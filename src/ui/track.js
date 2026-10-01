@@ -255,10 +255,17 @@ function showError(where, err) {
   let el = document.getElementById('err3d');
   if (!el) {
     el = document.createElement('div'); el.id = 'err3d';
-    el.style.cssText = 'position:absolute;left:50%;top:60px;transform:translateX(-50%);z-index:20;max-width:80%;background:#4c1219;color:#ffd7db;border:1px solid #ff5d6c;border-radius:8px;padding:8px 12px;font:12px/1.4 ui-monospace,monospace;user-select:text';
+    el.style.cssText = 'position:absolute;left:50%;top:60px;transform:translateX(-50%);z-index:20;max-width:80%;pointer-events:auto;background:#4c1219;color:#ffd7db;border:1px solid #ff5d6c;border-radius:8px;padding:8px 12px;font:12px/1.4 ui-monospace,monospace;user-select:text';
     (document.getElementById('mapwrap') || document.body).appendChild(el);
   }
-  el.textContent = `3-D view paused, showing the 2-D map. ${/context lost/i.test(err?.message || '') ? 'It will come back automatically when the browser restores the GPU. ' : ''}Error: ${err?.message || err}`;
+  const msg = err?.message || String(err), lost = /context lost/i.test(msg), low = /low-power 3D/.test(msg);
+  el.innerHTML = '';
+  el.append(`3-D view paused, showing the 2-D map. ${lost && !low ? 'Your browser ran short of graphics memory. ' : ''}Details: ${msg}`);
+  if (lost && !low) {
+    const b = document.createElement('button'); b.textContent = '↻ Retry 3D in low-power mode';
+    b.style.cssText = 'margin-left:10px;padding:3px 10px;background:#0d3a52;color:#cfe;border:1px solid #4cc9f0;border-radius:6px;cursor:pointer';
+    b.onclick = () => { try { localStorage.setItem('gfx', 'low'); } catch {} location.reload(); }; el.append(b);
+  } else if (lost) el.append(' Please send this line to get it fixed.');
 }
 function frame(now) {
   requestAnimationFrame(frame); // schedule first: one bad frame must never stop the loop
@@ -345,6 +352,6 @@ wire(); newSession(); requestAnimationFrame(frame);
 // 3-D view loads on its own: if WebGL or the models are unavailable, the 2-D views keep working.
 import('./world3d.js')
   .then((m) => m.createWorld3D({ canvas: $('glAll'), mainEl: $('mapwrap'), camEl: $('camwrap'), mainOverlay: $('ov3d'), camOverlay: $('ovcam') }))
-  .then((w) => { w3d = w; $('load3d').remove(); })
+  .then((w) => { w3d = w; $('load3d').remove(); import('./three-common.js').then((c) => { if (c.GFX.low) $('gfxNote').innerHTML = ' · <b>low-power 3D</b> (no shadows) · <a href="?gfx=high" style="color:#7cf">try full quality</a>'; }); })
   .catch((err) => { showError('3-D load', err); $('load3d')?.remove(); S.view = '2d'; });
 window.__track = () => sess;

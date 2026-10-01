@@ -2,7 +2,7 @@
 // The simulation stays the source of truth; this module only draws it:
 //   sim ground (x, y) -> three (x, 0, -y), y-up. Heights in metres.
 // Official NASA models (assets/nasa): astronaut, RASSOR (camera robot), Apollo Lunar Module.
-import { THREE, toV, hash, fbm, makeRenderer, fitRenderer, loadModel, starfield, drawLabels, isLost } from './three-common.js';
+import { THREE, toV, hash, fbm, makeRenderer, fitRenderer, loadModel, starfield, drawLabels, isLost, GFX } from './three-common.js';
 import { OrbitControls } from '../../vendor/three/examples/jsm/controls/OrbitControls.js';
 import { isHidden, hiddenCause } from '../mot/occlusion.js';
 
@@ -37,8 +37,8 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
   scene.add(new THREE.HemisphereLight(0x8fa8ff, 0x202020, 0.12));
 
   // stars + Earth low on the horizon (as seen from the lunar south pole)
-  scene.add(starfield());
-  const earth = new THREE.Mesh(new THREE.SphereGeometry(18, 48, 32), new THREE.MeshStandardMaterial({ color: 0x3a6ea5, emissive: 0x0c2340, roughness: 0.8 }));
+  scene.add(starfield(GFX.low ? 1200 : 3000));
+  const earth = new THREE.Mesh(new THREE.SphereGeometry(18, GFX.low ? 24 : 48, GFX.low ? 16 : 32), new THREE.MeshStandardMaterial({ color: 0x3a6ea5, emissive: 0x0c2340, roughness: 0.8 }));
   earth.position.set(140, 30, -420); scene.add(earth);
 
   // models
@@ -72,7 +72,7 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
     if (w.sun) { const K = 70; sun.position.set(K * Math.cos(w.sun.el) * Math.cos(w.sun.az), K * Math.sin(w.sun.el), -K * Math.cos(w.sun.el) * Math.sin(w.sun.az)); }
 
     // terrain
-    const G = new THREE.PlaneGeometry(200, 160, 220, 176); G.rotateX(-Math.PI / 2);
+    const G = GFX.low ? new THREE.PlaneGeometry(200, 160, 110, 88) : new THREE.PlaneGeometry(200, 160, 220, 176); G.rotateX(-Math.PI / 2);
     const pos = G.attributes.position, col = new Float32Array(pos.count * 3);
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i), y = -pos.getZ(i) + 20; // shift so the work area sits near the middle
@@ -86,7 +86,7 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
     // boulders: irregular rocks at the simulator's exact positions and heights (half-buried ellipsoids, as in the
     // visibility model), so what the 3-D camera shows is what the experiment measures
     w.boulders.forEach((b, i) => {
-      const geo = new THREE.IcosahedronGeometry(1, 4), p = geo.attributes.position;
+      const geo = new THREE.IcosahedronGeometry(1, GFX.low ? 2 : 4), p = geo.attributes.position;
       for (let k = 0; k < p.count; k++) {
         const v = new THREE.Vector3().fromBufferAttribute(p, k), n = 0.78 + 0.45 * fbm(v.x * 1.7 + i * 3, v.y * 1.7 + v.z * 1.3);
         p.setXYZ(k, v.x * n, v.y * n, v.z * n);

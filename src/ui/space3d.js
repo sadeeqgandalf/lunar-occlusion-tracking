@@ -1,7 +1,7 @@
 // Mission Control 3-D view (spacecraft platform): rendezvous and docking with NASA's Gateway model.
 // Hill frame -> scene: along-track y_T -> three x (horizontal), radial x_R -> three y (up), out-of-plane = z.
 // Chaser: NASA ESAS crew module (Orion's design predecessor). Model sizes are approximate (see constants).
-import { isLost, THREE, hash, fbm, makeRenderer, fitRenderer, loadModel, starfield, drawLabels, makeEnvironment } from './three-common.js';
+import { isLost, GFX, THREE, hash, fbm, makeRenderer, fitRenderer, loadModel, starfield, drawLabels, makeEnvironment } from './three-common.js';
 import { OrbitControls } from '../../vendor/three/examples/jsm/controls/OrbitControls.js';
 import { covEllipse } from '../filters/base.js';
 
@@ -12,7 +12,7 @@ const H = (xR, yT, z = 0) => new THREE.Vector3(yT, xR, z);
 export async function createSpace3D({ canvas, overlay }) {
   const R = makeRenderer(canvas, 1.1);
   const scene = new THREE.Scene(); scene.background = new THREE.Color(0x000000);
-  scene.add(starfield(4000, 900));
+  scene.add(starfield(GFX.low ? 1500 : 4000, 900));
   scene.environment = makeEnvironment(R); scene.environmentIntensity = 0.9; // lets NASA's metallic materials read correctly
   const sun = new THREE.DirectionalLight(0xffffff, 3.0); sun.position.set(300, 120, 260); scene.add(sun);
   scene.add(new THREE.HemisphereLight(0x8899aa, 0x222222, 0.25));

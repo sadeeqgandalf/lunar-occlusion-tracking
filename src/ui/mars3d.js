@@ -1,7 +1,7 @@
 // Mission Control 3-D view (rover platform): NASA's Mars 2020 Perseverance model driving Martian terrain,
 // with every estimator's belief drawn as a coloured ghost marker + 95% uncertainty disc on the ground.
 // The mission engine stays the source of truth; this module only draws it.
-import { isLost, THREE, toV, hash, fbm, makeRenderer, fitRenderer, loadModel, drawLabels } from './three-common.js';
+import { isLost, GFX, THREE, toV, hash, fbm, makeRenderer, fitRenderer, loadModel, drawLabels } from './three-common.js';
 import { OrbitControls } from '../../vendor/three/examples/jsm/controls/OrbitControls.js';
 import { covEllipse } from '../filters/base.js';
 
@@ -40,7 +40,7 @@ export async function createMars3D({ canvas, overlay }) {
       return h;
     };
     const B = w.bounds, W = B.xmax - B.xmin + 80, H = B.ymax - B.ymin + 80, cx = (B.xmin + B.xmax) / 2, cy = (B.ymin + B.ymax) / 2;
-    const G = new THREE.PlaneGeometry(W, H, 260, 180); G.rotateX(-Math.PI / 2);
+    const G = GFX.low ? new THREE.PlaneGeometry(W, H, 130, 90) : new THREE.PlaneGeometry(W, H, 260, 180); G.rotateX(-Math.PI / 2);
     const pos = G.attributes.position, col = new Float32Array(pos.count * 3);
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i) + cx, y = -pos.getZ(i) + cy;

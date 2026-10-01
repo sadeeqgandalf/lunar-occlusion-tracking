@@ -18,6 +18,22 @@ export const fbm = (x, y) => { let s = 0, a = 0.5, f = 1; for (let o = 0; o < 4;
 /** Simulator ground (x, y) -> Three.js (x, h, -y), y-up, metres. */
 export const toV = (x, y, h = 0) => new THREE.Vector3(x, h, -y);
 
+/**
+ * Graphics quality. 'low' = no real-time shadows, no anti-aliasing, 1x pixels, lighter meshes. It is chosen
+ * automatically after a GPU context loss (common on Safari under memory pressure) and remembered per browser;
+ * override with ?gfx=low or ?gfx=high.
+ */
+export const GFX = (() => {
+  let low = false;
+  try {
+    const q = new URLSearchParams(location.search).get('gfx');
+    if (q === 'high') localStorage.removeItem('gfx');
+    low = q === 'low' || (q !== 'high' && localStorage.getItem('gfx') === 'low');
+  } catch {}
+  return { low };
+})();
+const browserName = () => { try { const u = navigator.userAgent, s = /Version\/([\d.]+).*Safari/.exec(u), c = /Chrome\/([\d]+)/.exec(u), f = /Firefox\/([\d]+)/.exec(u); return s && !c ? `Safari ${s[1]}` : c ? `Chrome ${c[1]}` : f ? `Firefox ${f[1]}` : 'browser'; } catch { return 'browser'; } };
+
 const _renderers = new WeakMap();
 /**
  * One WebGL renderer (= one GPU context) per canvas, shared by every view that draws on it.
@@ -25,14 +41,21 @@ const _renderers = new WeakMap();
  */
 export function makeRenderer(canvas, exposure = 1.15) {
   if (_renderers.has(canvas)) return _renderers.get(canvas);
-  const r = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+  const r = new THREE.WebGLRenderer({ canvas, antialias: !GFX.low, powerPreference: 'high-performance' });
   _renderers.set(canvas, r);
-  r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5)); // retina at 1.5x: ~44% less GPU memory than 2x
-  r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap;
+  r.setPixelRatio(GFX.low ? 1 : Math.min(window.devicePixelRatio || 1, 1.5)); // retina at 1.5x: ~44% less GPU memory than 2x
+  r.shadowMap.enabled = !GFX.low; r.shadowMap.type = THREE.PCFSoftShadowMap;
   r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = exposure; r.outputColorSpace = THREE.SRGBColorSpace;
   // a lost GPU context (driver reset, sleep/wake, too many 3-D tabs) otherwise leaves a silent blank canvas
-  canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); r.userData = { lost: true }; });
-  canvas.addEventListener('webglcontextrestored', () => { r.userData = { lost: false }; }); // three.js re-uploads resources itself
+  // diagnostics: which GPU, and how long it ran, so a failure report is actionable
+  let gpu = 'unknown GPU';
+  try { const gl = r.getContext(), dbg = gl.getExtension('WEBGL_debug_renderer_info'); gpu = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER); } catch {}
+  r.userData = { lost: false, gpu, created: performance.now(), losses: 0 };
+  canvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault(); const u = r.userData; u.lost = true; u.losses++; u.lostAfter = (performance.now() - u.created) / 1000;
+    try { localStorage.setItem('gfx', 'low'); } catch {} // next load starts in low-power 3-D
+  });
+  canvas.addEventListener('webglcontextrestored', () => { r.userData.lost = false; }); // three.js re-uploads resources itself
   return r;
 }
 
@@ -41,7 +64,7 @@ export function makeRenderer(canvas, exposure = 1.15) {
 export const isLost = (r) => !!r.userData?.lost;
 
 export function fitRenderer(r, canvas, cam) {
-  if (r.userData?.lost) throw new Error('WebGL context lost (GPU reset, sleep/wake or too many 3-D tabs open)');
+  if (r.userData?.lost) { const u = r.userData; throw new Error(`WebGL context lost after ${u.lostAfter.toFixed(1)} s · ${browserName()} · GPU: ${u.gpu} · canvas ${canvas.width}×${canvas.height} @${r.getPixelRatio()}x · ${GFX.low ? 'low-power' : 'normal'} 3D`); }
   const w = canvas.clientWidth, h = canvas.clientHeight;
   if (!w || !h) return false;
   const pr = r.getPixelRatio();
