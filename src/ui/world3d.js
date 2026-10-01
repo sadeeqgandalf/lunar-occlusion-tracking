@@ -141,8 +141,8 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
       g.position.copy(toV(t.x, t.y, height(t.x, t.y))); g.rotation.y = Math.atan2(Math.cos(t.h), -Math.sin(t.h));
       g.visible = true;
       const hid = !t.vis.inFov || isHidden(t.vis);
-      // the 3-D model IS the truth; only hidden people get a label, at their feet, so it never collides with the tracker's tag
-      if (showTruth && hid) labels1.push({ p: toV(t.x, t.y, height(t.x, t.y) - 0.2), text: `${personName(t.id)} ${hiddenCause(t.vis) === 'shadow' ? 'in shadow' : 'behind rock'}`, color: '#ffffff', bg: '#e8ecf2cc', font: '11px system-ui', alpha: 0.9 });
+      // truth label (P1…) at the feet, so it never collides with the tracker's #tag above the head
+      if (showTruth) labels1.push({ p: toV(t.x, t.y, height(t.x, t.y) - 0.2), text: hid ? `${personName(t.id)} ${hiddenCause(t.vis) === 'shadow' ? 'in shadow' : 'behind rock'}` : personName(t.id), swatch: stripeOf(t.id).hex, color: '#ffffff', bg: '#e8ecf2cc', font: '11px system-ui', alpha: 0.9 });
     }
     // camera pings (orange discs on the ground)
     sess.last.dets.forEach((d) => {

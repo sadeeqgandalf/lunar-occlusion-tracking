@@ -30,7 +30,7 @@
   #who .p{display:flex;align-items:center;gap:6px;font-weight:700}#who .p i{width:12px;height:12px;border-radius:3px;display:inline-block}
   #who .sub{font-size:11px;color:var(--dim)}
   .chip{border-radius:8px;padding:0 7px;font-weight:700;color:#06101a}
-  #feed{font:12.5px/1.6 var(--mono)}#feed div{padding:2px 0;border-bottom:1px solid #182238}
+  #feed{font:12px/1.6 var(--mono)}#feed div{padding:2px 0;border-bottom:1px solid #182238}
   #feed .ok{color:var(--good)}#feed .bad{color:#ff9aa4}#feed .hide{color:var(--amber)}
   details#whatif summary{cursor:pointer;font:600 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin:12px 0 8px}
 </style>
@@ -39,7 +39,7 @@
 <header>
   <div class="brand"><span class="logo">◉</span><b>OCCLUSION</b> TRACKING LAB</div>
   <label><span class="lt">Scenario</span> <select id="scenario"></select></label>
-  <label><span class="lt">Seed</span> <input type="number" id="seed" value="7" min="1" max="9999" style="width:64px"></label>
+  <label><span class="lt">Seed</span> <input type="number" id="seed" value="8" min="1" max="9999" style="width:64px"></label>
   <div class="spacer"></div>
   <div class="clock" id="clock">T+000.0 s</div>
   <button id="play">⏸ Pause</button>
@@ -73,7 +73,7 @@
       <div id="cards"></div>
     </section>
     <section>
-      <h3>People <small>real person → tracker's ID</small></h3>
+      <h3>People <small id="whoTrk"></small></h3>
       <div id="who"></div>
       <label class="chk" style="margin-top:8px"><input type="checkbox" id="optTruth" checked> Show real people</label>
     </section>

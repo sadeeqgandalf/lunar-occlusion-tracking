@@ -9,7 +9,8 @@ import { lineChart } from './charts.js';
 import { idColor, idColorA, stripeOf, label, labelConfirmed, personName } from './idcolor.js';
 
 const $ = (id) => document.getElementById(id);
-const S = { scenario: 'boulders', seed: 7, speed: 2, paused: false, sel: 0, showTruth: true, view: '3d', overrides: {}, sw: [] };
+// default seed 8: a typical run (same ranking as the 20-seed average), not the best one (15) or the worst (7, 9, 16)
+const S = { scenario: 'boulders', seed: 8, speed: 2, paused: false, sel: 0, showTruth: true, view: '3d', overrides: {}, sw: [] };
 let w3d = null, w3dLost = null; // w3dLost: a 3-D view waiting for the browser to restore its GPU context
 const COLORS = ['#4ade80', '#4cc9f0', '#ff6b6b'];
 const PLAIN = {
@@ -17,12 +18,12 @@ const PLAIN = {
   'Occlusion-aware': 'Knows the blind spots, so it waits.',
   Naive: 'Forgets anyone it cannot see.',
 };
-let sess, feed = [], pending = new Map(), seenEv = [], prevHidden = new Map(), marks = [], prevMatch = new Map(), prevSel = -1, idHist = new Map();
+let sess, feed = [], pending = new Map(), seenEv = [], prevHidden = new Map(), marks = [], prevMatch = [], idHist = [];
 
 function newSession() {
   sess = new MotSession({ scenario: S.scenario, seed: S.seed, overrides: S.overrides });
   S.sw = sess.runs.map(() => []);
-  feed = []; pending = new Map(); seenEv = sess.runs.map(() => 0); prevHidden = new Map(); marks = []; prevMatch = new Map(); idHist = new Map();
+  feed = []; pending = new Map(); seenEv = sess.runs.map(() => 0); prevHidden = new Map(); marks = []; prevMatch = sess.runs.map(() => new Map()); idHist = sess.runs.map(() => new Map());
   pushFeed(MOT_SCENARIOS[S.scenario].label, '');
   buildCards();
 }
@@ -31,18 +32,21 @@ function newSession() {
 function pushFeed(text, cls) { feed.unshift({ t: sess.world.t, text, cls }); if (feed.length > 60) feed.pop(); }
 const chip = (txt, color) => `<span class="chip" style="background:${color}">${txt}</span>`;
 const idChip = (n) => chip('#' + n, idColor(n));
+const hidChip = (n) => `<span class="chip" style="background:none;color:${idColor(n)};border:1.5px dashed ${idColor(n)}">#${n}?</span>`;
 const pChip = (gid) => chip(personName(gid), stripeOf(gid).hex);
 function updateFeed() {
   const W = sess.world;
-  // ID switches for the tracker on display: the same real person now carries a different tracker ID
-  const T = sess.runs[S.sel].tracker;
-  if (prevSel !== S.sel) { prevMatch = new Map(sess.runs[S.sel].metrics.lastMatch); prevSel = S.sel; idHist = new Map(); }
-  for (const [gid, kid] of sess.runs[S.sel].metrics.lastMatch) {
-    const before = prevMatch.get(gid), n = label(T, kid);
-    if (before !== undefined && before !== kid) pushFeed(`${pChip(gid)} ${idChip(label(T, before))} → ${idChip(n)} ID switch`, 'bad');
-    prevMatch.set(gid, kid);
-    const h = idHist.get(gid) || []; if (h[h.length - 1] !== n) { h.push(n); idHist.set(gid, h); }
-  }
+  // ID switches: the same real person now carries a different tracker ID. History is kept for every tracker (so
+  // switching the shown tracker loses nothing); the feed announces switches of the tracker on display, tagged with its name.
+  sess.runs.forEach((r, i) => {
+    const T = r.tracker, pm = prevMatch[i], hist = idHist[i];
+    for (const [gid, kid] of r.metrics.lastMatch) {
+      const before = pm.get(gid), n = label(T, kid);
+      if (i === S.sel && before !== undefined && before !== kid) pushFeed(`${pChip(gid)} ${idChip(label(T, before))} → ${idChip(n)} ID switch <span style="color:${COLORS[i]}">${short(T.name)}</span>`, 'bad');
+      pm.set(gid, kid);
+      const h = hist.get(gid) || []; if (h[h.length - 1] !== n) { h.push(n); hist.set(gid, h); }
+    }
+  });
   for (const g of W.targets) {
     const hid = isHidden(g.vis), was = prevHidden.get(g.id);
     if (hid && was === false) pushFeed(`${pChip(g.id)} ${hiddenCause(g.vis) === 'shadow' ? 'in shadow' : 'behind rock'}`, 'hide');
@@ -60,9 +64,10 @@ function updateFeed() {
   });
   for (const [key, p] of pending) {
     if (Object.keys(p.res).length < sess.runs.length && W.t - p.t < 2.5) continue;
-    const parts = sess.runs.map((r) => { const k = p.res[r.tracker.name]; return `${short(r.tracker.name)} ${k === undefined ? '…' : k ? '✔' : '✘'}`; });
+    // verdict per tracker, name in its card colour; 'NI' = Aware + neg. info (keeps the line on one row)
+    const parts = sess.runs.map((r, i) => { const k = p.res[r.tracker.name]; return `<span style="color:${COLORS[i]}">${short(r.tracker.name).replace('Aware+NI', 'NI')}</span>${k === undefined ? '…' : k ? '✔' : '✘'}`; });
     const anyKept = Object.values(p.res).some(Boolean);
-    pushFeed(`${pChip(key)} back · ${parts.join(' ')}`, anyKept ? 'ok' : 'bad');
+    pushFeed(`${pChip(key)} back (${p.dur.toFixed(0)} s) ${parts.join(' ')}`, anyKept ? 'ok' : 'bad');
     pending.delete(key);
   }
 }
@@ -78,16 +83,18 @@ function buildCards() {
 }
 function updateCards() {
   sess.runs.forEach((r, i) => {
-    const s = r.metrics.summary(), b = s.occByDuration.slice(0, 2), k = b.reduce((a, x) => a + x.kept, 0), n = b.reduce((a, x) => a + x.n, 0);
+    const s = r.metrics.summary(), ev = r.metrics.events, k = ev.filter((e) => e.kept).length, n = ev.length; // every hide ≥ 1 s = every "back" line in the feed
     $('kept' + i).textContent = `${k} / ${n}`; // counts, not %: a few events in one run make percentages misleading
     $('idsw' + i).textContent = s.idsw;
   });
   // people: each real person, the ID the shown tracker gives them now, and every ID they have had
   const T = sess.runs[S.sel].tracker, live = new Set(T.reported().map((k) => k.id)), lm = sess.runs[S.sel].metrics.lastMatch;
+  $('whoTrk').innerHTML = `IDs given by <b style="color:${COLORS[S.sel]}">${short(T.name)}</b>`;
   $('who').innerHTML = '<span class="sub">Person</span><span class="sub">Now</span><span class="sub">IDs so far</span>' + sess.world.targets.map((g) => {
     const kid = lm.get(g.id), hid = isHidden(g.vis);
-    const now = hid ? '<i style="color:var(--amber)">hidden</i>' : kid !== undefined && live.has(kid) ? idChip(label(T, kid)) : '<i style="color:var(--dim)">–</i>';
-    const h = idHist.get(g.id) || [], shown = h.length > 4 ? ['…', ...h.slice(-3).map(idChip)] : h.map(idChip);
+    const held = kid !== undefined && T.tracks.some((k) => k.id === kid && k.confirmed); // tracker still remembers them
+    const now = hid ? (held ? hidChip(label(T, kid)) : '<i style="color:#ff9aa4">lost</i>') : kid !== undefined && live.has(kid) ? idChip(label(T, kid)) : '<i style="color:var(--dim)">–</i>';
+    const h = idHist[S.sel].get(g.id) || [], shown = h.length > 4 ? ['…', ...h.slice(-3).map(idChip)] : h.map(idChip);
     const sw = h.length > 1 ? ` <b style="color:#ff9aa4">${h.length - 1}✘</b>` : '';
     return `<span class="p"><i style="background:${stripeOf(g.id).hex}"></i>${personName(g.id)}</span><span>${now}</span><span>${shown.join(' ') || '–'}${sw}</span>`;
   }).join('');
@@ -355,9 +362,9 @@ const TRACK_TOUR = (api) => [
   { at: '#goal', title: '1 · The question', text: 'People are <b>P1–P5</b> (suit stripe colour). The tracker names them <b>#11, #12…</b> When P3 walks behind a rock, does P3 come back with the same number? A new number is an <b>ID switch</b>.' },
   { at: '#mapwrap', title: '2 · The world', text: 'Real NASA models. Coloured <b>rings and #tags</b> are what the tracker believes. A dashed <b>#11?</b> with a shaded area means "hidden, probably in here". Drag to orbit.' },
   { at: '#camwrap', title: '3 · What the rover camera sees', text: 'The mask colour on each person is the tracker\'s ID. Same stripe, new mask colour = ID switch.' },
-  { at: '#cards', title: '4 · Three trackers', text: 'Same camera data, different handling of a missed detection. <b>Came back with same ID</b>: e.g. 3 / 4 means 3 of 4 short hides (1–5 s) kept their number; higher is better. <b>ID switches</b>: lower is better.', action: { label: 'Show the naive tracker', run: () => api.showNaive() } },
-  { at: '#who', title: '5 · People', text: 'One row per real person. <b>IDs so far</b> lists every number the tracker gave them. One number = never lost. Each extra number is one ID switch (✘).' },
-  { at: '#feed', title: '6 · What happened', text: '"P3 behind rock", then "P3 back" with ✔ (same ID) or ✘ (new ID) for each tracker.' },
+  { at: '#cards', title: '4 · Three trackers', text: 'Same camera data, different handling of a missed detection. <b>Came back with same ID</b>: e.g. 3 / 4 means 3 of 4 people who hid came back with their old number; higher is better. <b>ID switches</b>: lower is better.', action: { label: 'Show the naive tracker', run: () => api.showNaive() } },
+  { at: '#who', title: '5 · People', text: 'One row per real person. <b>Now</b>: their ID, <b>#11?</b> if hidden but still remembered, <b>lost</b> if the tracker gave up. <b>IDs so far</b> lists every number the tracker gave them. One number = never lost. Each extra number is one ID switch (✘).' },
+  { at: '#feed', title: '6 · What happened', text: '"P3 behind rock", then "P3 back (4 s)" with ✔ (same ID) or ✘ (new ID) for each tracker: <b>NI</b> = Aware + neg. info, then Aware, then Naive, in their card colours.' },
   { at: '#scenario', title: '7 · Shadows', text: 'At the lunar south pole the sun is low and shadows are long. People in shadow are in view but too dark to detect.', action: { label: '🌑 Switch to South pole', run: () => api.polar() } },
   { at: null, title: 'Go deeper', text: '<b>What if…?</b> (sidebar) changes the world. <b>📘 Guide</b> explains each idea: plain words, maths, code, paper.' },
 ];

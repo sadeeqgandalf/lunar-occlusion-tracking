@@ -129,11 +129,13 @@ export function drawLabels(ov, cam, items) {
     const v = it.p.clone().project(cam);
     if (v.z > 1 || v.z < -1 || Math.abs(v.x) > 1.05 || Math.abs(v.y) > 1.05) continue;
     const x = (v.x * 0.5 + 0.5) * w, y = (-v.y * 0.5 + 0.5) * h;
-    c.font = it.font || 'bold 12px system-ui'; const tw = c.measureText(it.text).width + 12;
+    c.font = it.font || 'bold 12px system-ui'; const sw = it.swatch ? 12 : 0, tw = c.measureText(it.text).width + 12 + sw;
     c.globalAlpha = it.alpha ?? 1;
     c.beginPath(); c.roundRect(x - tw / 2, y - 20, tw, 19, 9.5);
     if (it.dashed) { c.fillStyle = '#0a0e16dd'; c.fill(); c.setLineDash([3, 3]); c.strokeStyle = it.color; c.lineWidth = 1.5; c.stroke(); c.setLineDash([]); c.fillStyle = it.color; }
     else { c.fillStyle = it.bg || it.color; c.fill(); c.fillStyle = it.fg || '#06101a'; }
-    c.textAlign = 'center'; c.fillText(it.text, x, y - 6); c.textAlign = 'left'; c.globalAlpha = 1;
+    c.textAlign = 'center'; c.fillText(it.text, x + sw / 2, y - 6); c.textAlign = 'left';
+    if (sw) { c.fillStyle = it.swatch; c.beginPath(); c.arc(x - tw / 2 + 11, y - 10.5, 4.5, 0, Math.PI * 2); c.fill(); } // suit-stripe dot
+    c.globalAlpha = 1;
   }
 }
