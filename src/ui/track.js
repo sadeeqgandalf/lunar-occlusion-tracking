@@ -5,7 +5,8 @@ import { MOT_SCENARIOS } from '../mot/world.js';
 import { wrapAngle, TAU } from '../core/linalg.js';
 
 const $ = (id) => document.getElementById(id);
-const S = { scenario: 'boulders', seed: 7, speed: 2, paused: false, sel: 0, showTruth: true };
+const S = { scenario: 'boulders', seed: 7, speed: 2, paused: false, sel: 0, showTruth: true, view: '3d' };
+let w3d = null;
 const COLORS = ['#4ade80', '#4cc9f0', '#ff6b6b'];
 const PLAIN = {
   'Aware + neg. info': 'Knows the blind spots AND reasons "I can\'t see them, so they must be behind that rock".',
@@ -243,7 +244,13 @@ let acc = 0, last = performance.now(), uiT = 0;
 function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.1); last = now;
   if (!S.paused) { acc += dt * S.speed; let n = 0; while (acc >= sess.world.dt && n < 200) { sess.step(); updateFeed(); acc -= sess.world.dt; n++; } if (n === 200) acc = 0; }
-  drawMap(); drawCam();
+  const use3d = S.view === '3d' && w3d;
+  for (const id of ['map', 'cam']) $(id).style.display = use3d ? 'none' : 'block';
+  for (const id of ['gl3d', 'ov3d', 'glcam', 'ovcam', 'hint3d']) $(id).style.display = use3d ? 'block' : 'none';
+  if (use3d) {
+    marks = marks.filter((m) => sess.world.t - m.t < 4);
+    w3d.render(sess, { sel: S.sel, color: COLORS[S.sel], showTruth: S.showTruth, marks: marks.filter((m) => m.run === S.sel).map((m) => ({ ...m, alpha: Math.max(1 - (sess.world.t - m.t) / 4, 0.2) })) });
+  } else { drawMap(); drawCam(); }
   if (now - uiT > 250) { uiT = now; updateCards(); }
   requestAnimationFrame(frame);
 }
@@ -259,8 +266,14 @@ function wire() {
   $('speed').onclick = (e) => { const v = e.target.dataset.v; if (!v) return; S.speed = +v; [...$('speed').children].forEach((b) => b.classList.toggle('on', b === e.target)); };
   $('cards').onclick = (e) => { const el = e.target.closest('.tcard'); if (!el) return; S.sel = +el.dataset.i; buildCards(); updateCards(); };
   $('optTruth').onchange = (e) => { S.showTruth = e.target.checked; };
+  $('viewsw').onclick = (e) => { const v = e.target.dataset.v; if (!v) return; S.view = v; [...$('viewsw').children].forEach((b) => b.classList.toggle('on', b === e.target)); };
   window.onkeydown = (e) => { if (e.key === ' ' && e.target.tagName !== 'INPUT') { e.preventDefault(); $('play').click(); } };
 }
 
 wire(); newSession(); requestAnimationFrame(frame);
+// 3-D view loads on its own: if WebGL or the models are unavailable, the 2-D views keep working.
+import('./world3d.js')
+  .then((m) => m.createWorld3D({ mainCanvas: $('gl3d'), mainOverlay: $('ov3d'), camCanvas: $('glcam'), camOverlay: $('ovcam') }))
+  .then((w) => { w3d = w; $('load3d').remove(); })
+  .catch((err) => { console.warn('3-D view unavailable:', err); $('load3d').textContent = '3-D view unavailable here: using the top-down map.'; S.view = '2d'; });
 window.__track = () => sess;

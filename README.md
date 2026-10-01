@@ -4,7 +4,9 @@
 
 This repository answers that question with a controlled, reproducible experiment and an interactive lab where you can watch it happen. It is a portfolio research project in multi-object tracking (MOT) under occlusion, using an Artemis-style lunar EVA scenario.
 
-![Occlusion Tracking Lab: bird's-eye scene with camera blind-spot wedges, rendered camera view, three trackers compared live](docs/img/occlusion-lab.png)
+![Occlusion Tracking Lab in 3-D: NASA astronaut models walking a lunar boulder field under south-pole lighting, the camera robot's rendered view below, three trackers compared live](docs/img/occlusion-lab-3d.png)
+
+The lab runs in **real-time 3-D** (Three.js/WebGL) with **official NASA 3-D models**: astronauts, the RASSOR lunar robot carrying the camera, and the Apollo Lunar Module. Lighting is modelled on the lunar south pole, the target region for crewed lunar landings: a low sun casting long shadows (~7° elevation here; the real polar sun is lower still, ~1–2°, raised slightly so the scene stays readable). The camera robot's view is rendered from its mast with the GPU depth buffer, so you see occlusion exactly as a real camera would. A top-down map view is one click away.
 
 ```bash
 npm start                                   # zero dependencies, Node >= 18
@@ -73,14 +75,19 @@ Modelling the disturbances as states (wheel slip, wind, accelerometer bias) fixe
 **Language choice, measured.** The rover EKF was ported to C++17 and Python/numpy and replayed on one recorded trace (`bench/xlang/`). All three agree to ~4e-10. Per step: C++ ≈ 0.1 µs (0.08–0.13 across runs), JS ≈ 2.5 µs, numpy ≈ 9 µs. Caveats: single trace, single machine, rover model only. At this state size all three are far inside a 20 Hz budget, so the choice follows the job: browser JS for this interactive lab, C++ for embedded/flight-style code, Python for offline analysis.
 
 ## Roadmap
-1. **3-D camera and depth-buffer occlusion.** Use a pinhole camera on a mast and rasterised visibility masks (the PyTorch3D camera/rasterizer approach), so a person behind a low rock is partially visible over it, as a real camera would see. The masks double as segmentation (MOTS).
-2. **Appearance re-identification** for long occlusions, linking to SAM-based MOTS work in a separate repository.
-3. **Python reference implementation** and evaluation on real occlusion-labelled data (MOT17 / KITTI tracking) with HOTA via TrackEval.
-4. **IMM motion models** for turning targets.
+1. **3-D visibility in the experiment itself.** Compute visibility from the rendered depth/ID buffer, so a person behind a low rock is partially visible over it, and add south-pole shadows as a second kind of occlusion (people walking into darkness). The ID masks double as segmentation (MOTS).
+2. **Synthetic MOTS dataset with PyTorch3D.** Render the same scenes offline (images, per-person masks, depth, IDs) to train and evaluate SAM-style trackers.
+3. **Appearance re-identification** for long occlusions, linking to SAM-based MOTS work in a separate repository.
+4. **Python reference implementation** and evaluation on real occlusion-labelled data (MOT17 / KITTI tracking) with HOTA via TrackEval.
+5. **IMM motion models** for turning targets.
+
+## Credits
+* **3-D models:** NASA 3D Resources (https://github.com/nasa/NASA-3D-Resources): Astronaut, RASSOR, Apollo Lunar Module, Mars 2020 Perseverance. NASA states these assets are free and without copyright, and their use follows NASA's media usage guidelines. Details: [`assets/nasa/README.md`](assets/nasa/README.md). **No NASA endorsement of this project is implied.**
+* **Rendering:** Three.js r169 (MIT), vendored in `vendor/three/` so the app runs offline.
 
 ## Limitations (so you can trust the rest)
 * **Simulator, not NASA software.** This is an independent portfolio project. It is not affiliated with or endorsed by NASA, and nothing here is flight-qualified.
-* **2-D (planar) world.** Occlusion is computed in the ground plane, so height is ignored (roadmap item 1). Walkers are simulated, and detections come from a sensor model rather than a neural detector.
+* **Occlusion is computed in the ground plane.** The 3-D view is rendered with real depth, but the tracking experiment's visibility model is planar, so boulders are drawn taller than the camera mast to keep the two consistent. True 3-D visibility (seeing over low rocks) is roadmap item 1. Walkers are simulated, and detections come from a sensor model rather than a neural detector.
 * **The navigation lab's dynamics are time-compressed** (rover ~1 m/s, spacecraft mean motion ~9× real LEO), and its sensor noise values are plausible, not characterised from hardware.
 * **No ROS 2 node has been built.** ROS isn't installed on the development machine.
 * **UI testing:** UIs are tested by a stub-DOM test (every code path) and were inspected in a headless Chromium at several window sizes and pixel ratios. They have not been tested on mobile.
@@ -93,7 +100,9 @@ src/models      rover · jet · spacecraft estimation models
 src/filters     DR, EKF, UKF, particle filter
 src/platforms   truth dynamics + sensors + autopilot per vehicle
 src/sim         mission engine, scenarios, metrics
-src/ui          both labs' front ends (track.js = Occlusion Lab)
+src/ui          both labs' front ends (track.js = Occlusion Lab, world3d.js = 3-D view)
+assets/nasa     official NASA 3-D models (see its README for terms)
+vendor/three    Three.js r169 (MIT), loaders + Draco decoder
 experiments/    reproducible occlusion ablation + results.md
 test/  bench/   tests, navigation benchmarks, cross-language proof
 docs/           operator's guide, theory map, screenshots

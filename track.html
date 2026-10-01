@@ -5,11 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Occlusion Tracking Lab</title>
 <link rel="stylesheet" href="styles.css">
+<script type="importmap">{ "imports": { "three": "./vendor/three/build/three.module.min.js" } }</script>
 <style>
   main.trk{display:grid;grid-template-columns:minmax(0,1fr) 380px;min-height:0;flex:1}
   #stage{display:flex;flex-direction:column;min-width:0;min-height:0;background:#07090f}
   #mapwrap{position:relative;flex:1;min-height:0}
-  #map,#cam{position:absolute;inset:0;width:100%;height:100%;display:block}
+  #map,#cam,#gl3d,#glcam,#ov3d,#ovcam{position:absolute;inset:0;width:100%;height:100%;display:block}
+  #ov3d,#ovcam{pointer-events:none}
+  #viewsw{position:absolute;left:10px;top:10px;display:flex;z-index:3}#viewsw button{border-radius:0;margin-left:-1px}#viewsw button:first-child{border-radius:6px 0 0 6px}#viewsw button:last-child{border-radius:0 6px 6px 0}#viewsw button.on{background:var(--cyan);color:#04202d;border-color:var(--cyan)}
+  #load3d{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:var(--dim);font:13px var(--mono)}
+  .hint3d{position:absolute;left:10px;bottom:10px;font-size:11.5px;color:#9aa3b2;background:#0a0e16cc;padding:4px 8px;border-radius:6px;pointer-events:none}
   #camwrap{position:relative;height:30%;min-height:150px;border-top:1px solid var(--line)}
   .cap{position:absolute;left:10px;top:8px;font:600 11px var(--mono);letter-spacing:.1em;color:var(--dim);background:#0a0e16cc;padding:3px 8px;border-radius:6px;pointer-events:none}
   #goal{padding:9px 14px;border-bottom:1px solid var(--line);background:#0c1322;font-size:13.5px}
@@ -60,10 +65,12 @@
       <span><b style="color:#4ade80">✔ same ID</b> / <b style="color:#ff6b6b">✘ new ID</b> when someone reappears</span>
     </div>
     <div id="analogy">Real-life version: like watching friends walk behind pillars in a mall. A good watcher remembers where each one was heading, so when someone steps out, they know who it is. The naive watcher forgets anyone they can't see, and greets them as a stranger.</div>
-    <div id="mapwrap"><canvas id="map"></canvas>
+    <div id="mapwrap"><canvas id="map"></canvas><canvas id="gl3d"></canvas><canvas id="ov3d"></canvas>
+      <div id="viewsw"><button data-v="3d" class="on">3D world (NASA models)</button><button data-v="2d">Top-down map</button></div>
+      <div id="load3d">Loading NASA 3D models…</div><div class="hint3d" id="hint3d">Drag to orbit · scroll to zoom · right-drag to pan</div>
       <div id="now"></div>
     </div>
-    <div id="camwrap"><canvas id="cam"></canvas><div class="camcap">CAMERA VIEW (what the rover sees) · <i style="color:#ffb454">orange box</i> = detection · <i id="camTrk">coloured box</i> = tracked, dashed = believed hidden behind a rock</div></div>
+    <div id="camwrap"><canvas id="cam"></canvas><canvas id="glcam"></canvas><canvas id="ovcam"></canvas><div class="camcap">CAMERA VIEW (what the rover sees) · <i style="color:#ffb454">orange box</i> = detection · <i id="camTrk">coloured box</i> = tracked, dashed = believed hidden behind a rock</div></div>
   </div>
   <aside id="right">
     <section>
