@@ -48,7 +48,7 @@ export class MotWorld {
         if (!this.boulders.some((b) => Math.hypot(b.x - p.x, b.y - p.y) < b.r + 1.2)) break;
       }
       const h = r.uniform(-Math.PI, Math.PI), v = r.uniform(0.6, 1.3);
-      this.targets.push({ id: i + 1, x: p.x, y: p.y, h, v, trail: [] });
+      this.targets.push({ id: i + 1, x: p.x, y: p.y, h, v, trail: [], vis: visibility(this.cam, this.boulders, p.x, p.y, this.cam.targetR) });
     }
   }
 
