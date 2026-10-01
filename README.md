@@ -16,6 +16,12 @@ npm test                                    # 32 tests
 node experiments/occlusion_ablation.mjs     # regenerates experiments/results.md (20 seeds x 3 scenarios, ~2 min)
 ```
 
+## Learn it
+
+* **[Learning guide](docs/OCCLUSION_GUIDE.md):** every idea in plain words, then the maths, then the exact code location, then the paper behind it, then something to try in the lab.
+* **[References](docs/REFERENCES.md):** every method traced to the literature (tracking, data association, existence, evaluation, lunar illumination). Each citation was checked against publisher or index records. The file also says honestly what is standard here and what is not claimed.
+* **In the lab:** a 10-step **▶ Tour**, a **What if…?** panel (detection rate, false alarms, crowd size, low rocks, polar shadows), a live ID-switch chart, and a glossary with links into the guide.
+
 ## The experiment
 
 Three trackers watch the **same** camera detections. They are identical (constant-velocity EKF per track, χ² gating, likelihood-ratio global-nearest-neighbour association, Bayesian track existence) except for one thing, how they treat occlusion:

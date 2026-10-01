@@ -51,6 +51,8 @@
   <button id="play">⏸ Pause</button>
   <div class="seg" id="speed"></div>
   <button id="reset">↺ Reset</button>
+  <button id="tourBtn" class="accent" title="Step-by-step guided tour">▶ Tour</button>
+  <a href="https://github.com/sadeeqgandalf/lunar-occlusion-tracking/blob/main/docs/OCCLUSION_GUIDE.md" target="_blank" rel="noopener"><button title="Learning guide: plain words, maths, code, papers">📘 Guide</button></a>
   <a href="index.html"><button title="The ego-navigation lab">Mission Control →</button></a>
 </header>
 <div id="goal"><b>Goal: don't lose them when you can't see them.</b> When someone walks behind a boulder, does the tracker keep their ID, or call them a new person when they reappear? Three trackers watch the <i>same</i> camera detections; the only difference is how they think about occlusion.</div>
@@ -80,14 +82,28 @@
     </section>
     <section class="log"><h3>What just happened</h3><div id="feed"></div></section>
     <section>
+      <h3>ID switches so far <small>lower is better</small></h3>
+      <canvas id="chSw" class="chart" style="width:100%;height:120px"></canvas>
+    </section>
+    <section id="whatif">
+      <h3>What if…? <small>change the world, then Apply</small></h3>
+      <label class="slider">Detection rate when fully visible <b id="wv-pd">0.95</b><input type="range" id="w-pd" min="0.6" max="0.99" step="0.01" value="0.95"></label>
+      <label class="slider">False alarms per frame <b id="wv-clutter">0.8</b><input type="range" id="w-clutter" min="0" max="3" step="0.1" value="0.8"></label>
+      <label class="slider">Number of people <b id="wv-targets">5</b><input type="range" id="w-targets" min="2" max="10" step="1" value="5"></label>
+      <label class="slider">Share of low rocks (see heads over them) <b id="wv-lowFrac">0.35</b><input type="range" id="w-lowFrac" min="0" max="1" step="0.05" value="0.35"></label>
+      <label class="chk"><input type="checkbox" id="w-shadows"> Low polar sun: people can vanish into shadows</label>
+      <div class="btnrow" style="margin-top:6px"><button id="w-apply" class="accent">Apply (restart)</button><button id="w-reset">Scenario defaults</button></div>
+      <p class="hint" id="w-note">Each run uses the scenario's seed, so you can compare settings fairly. Single runs vary a lot: trust the 20-seed results in the README, not one run.</p>
+    </section>
+    <section>
       <h3>Glossary</h3>
       <details class="gloss" open><summary>Every word on this page, in plain English</summary>
       <dl>
-        <dt>Detection</dt><dd>One "I see something here" from the camera in one frame. It has a position but no name. Some are false alarms (dust, glare).</dd>
-        <dt>Track / ID (#12)</dt><dd>The tracker's running record of one person over time, with a number. Keeping the <i>same</i> number for the same person is the whole job.</dd>
-        <dt>Occlusion</dt><dd>Something blocks the camera's view of a person, here a boulder. They still exist; the camera just can't see them.</dd>
-        <dt>Coasting / hidden track</dt><dd>While someone is hidden, the tracker keeps guessing where they are from how they were moving (the dashed shapes). The ellipse is how unsure it is: bigger = less sure.</dd>
-        <dt>ID kept / ID switch</dt><dd>When the person reappears, did they get their old number back (kept ✔) or a new one (switch ✘)? A new number means the system now thinks there are two different people.</dd>
+        <dt>Detection <a href="https://github.com/sadeeqgandalf/lunar-occlusion-tracking/blob/main/docs/OCCLUSION_GUIDE.md#3-from-visibility-to-a-detection" target="_blank" rel="noopener" style="font-weight:400;font-size:11px">guide ↗</a></dt><dd>One "I see something here" from the camera in one frame. It has a position but no name. Some are false alarms (dust, glare).</dd>
+        <dt>Track / ID (#12) <a href="https://github.com/sadeeqgandalf/lunar-occlusion-tracking/blob/main/docs/OCCLUSION_GUIDE.md#4-following-one-person-the-constant-velocity-kalman-filter" target="_blank" rel="noopener" style="font-weight:400;font-size:11px">guide ↗</a></dt><dd>The tracker's running record of one person over time, with a number. Keeping the <i>same</i> number for the same person is the whole job.</dd>
+        <dt>Occlusion <a href="https://github.com/sadeeqgandalf/lunar-occlusion-tracking/blob/main/docs/OCCLUSION_GUIDE.md#1-what-the-camera-can-and-cannot-see" target="_blank" rel="noopener" style="font-weight:400;font-size:11px">guide ↗</a></dt><dd>Something blocks the camera's view of a person, here a boulder. They still exist; the camera just can't see them.</dd>
+        <dt>Coasting / hidden track <a href="https://github.com/sadeeqgandalf/lunar-occlusion-tracking/blob/main/docs/OCCLUSION_GUIDE.md#6-does-this-track-still-exist-where-occlusion-awareness-happens" target="_blank" rel="noopener" style="font-weight:400;font-size:11px">guide ↗</a></dt><dd>While someone is hidden, the tracker keeps guessing where they are from how they were moving (the dashed shapes). The ellipse is how unsure it is: bigger = less sure.</dd>
+        <dt>ID kept / ID switch <a href="https://github.com/sadeeqgandalf/lunar-occlusion-tracking/blob/main/docs/OCCLUSION_GUIDE.md#8-how-we-score-and-what-the-results-say" target="_blank" rel="noopener" style="font-weight:400;font-size:11px">guide ↗</a></dt><dd>When the person reappears, did they get their old number back (kept ✔) or a new one (switch ✘)? A new number means the system now thinks there are two different people.</dd>
         <dt>ID kept through occlusion (big %)</dt><dd>Of people who were tracked, then hidden for 1–5 seconds, the share that got their old ID back. Higher is better.</dd>
         <dt>IDF1</dt><dd>How consistently each real person carried one ID over the whole run (0 to 1, higher is better).</dd>
         <dt>MOTA</dt><dd>Overall accuracy: penalises missed people, false tracks and ID switches together (up to 1, higher is better).</dd>

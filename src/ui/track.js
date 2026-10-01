@@ -4,9 +4,11 @@ import { MotSession } from '../mot/session.js';
 import { MOT_SCENARIOS } from '../mot/world.js';
 import { wrapAngle, TAU } from '../core/linalg.js';
 import { isHidden, hiddenCause } from '../mot/occlusion.js';
+import { runTour } from './tour.js';
+import { lineChart } from './charts.js';
 
 const $ = (id) => document.getElementById(id);
-const S = { scenario: 'boulders', seed: 7, speed: 2, paused: false, sel: 0, showTruth: true, view: '3d' };
+const S = { scenario: 'boulders', seed: 7, speed: 2, paused: false, sel: 0, showTruth: true, view: '3d', overrides: {}, sw: [] };
 let w3d = null;
 const COLORS = ['#4ade80', '#4cc9f0', '#ff6b6b'];
 const PLAIN = {
@@ -22,7 +24,8 @@ const BLURB = {
 let sess, feed = [], pending = new Map(), seenEv = [], prevHidden = new Map(), marks = [];
 
 function newSession() {
-  sess = new MotSession({ scenario: S.scenario, seed: S.seed });
+  sess = new MotSession({ scenario: S.scenario, seed: S.seed, overrides: S.overrides });
+  S.sw = sess.runs.map(() => []);
   feed = []; pending = new Map(); seenEv = sess.runs.map(() => 0); prevHidden = new Map(); marks = [];
   pushFeed(`${MOT_SCENARIOS[S.scenario].label}: ${MOT_SCENARIOS[S.scenario].blurb}`, '');
   buildCards();
@@ -81,6 +84,7 @@ function updateCards() {
   });
   $('feed').innerHTML = feed.map((f) => `<div class="${f.cls}"><b>${f.t.toFixed(0).padStart(4)}s</b> ${f.text}</div>`).join('');
   $('clock').textContent = `T+${sess.world.t.toFixed(1).padStart(5, '0')} s`;
+  lineChart($('chSw'), { title: 'cumulative ID switches (green / blue / red trackers)', tMin: 0, tMax: Math.max(10, sess.world.t), series: S.sw.map((pts, i) => ({ color: COLORS[i], width: i === S.sel ? 2.2 : 1.4, pts })) });
   const hiddenNow = sess.world.targets.filter((t) => isHidden(t.vis)).length, col = COLORS[S.sel];
   $('now').innerHTML = `Watching: <span class="sw" style="background:${col}"></span><b style="color:${col}">${sess.runs[S.sel].tracker.name}</b><br>${hiddenNow} of ${sess.world.targets.length} people hidden right now (behind rocks${sess.world.cfg.shadows ? ' or in shadow' : ''})`;
   document.documentElement.style.setProperty('--trk', col);
@@ -244,7 +248,10 @@ function drawCam() {
 let acc = 0, last = performance.now(), uiT = 0;
 function frame(now) {
   const dt = Math.min((now - last) / 1000, 0.1); last = now;
-  if (!S.paused) { acc += dt * S.speed; let n = 0; while (acc >= sess.world.dt && n < 200) { sess.step(); updateFeed(); acc -= sess.world.dt; n++; } if (n === 200) acc = 0; }
+  if (!S.paused) { acc += dt * S.speed; let n = 0; while (acc >= sess.world.dt && n < 200) {
+    sess.step(); updateFeed(); acc -= sess.world.dt; n++;
+    if (sess.world.frame % 10 === 0) sess.runs.forEach((r, i) => S.sw[i].push([sess.world.t, r.metrics.idsw])); // 1 Hz series
+  } if (n === 200) acc = 0; }
   const use3d = S.view === '3d' && w3d;
   for (const id of ['map', 'cam']) $(id).style.display = use3d ? 'none' : 'block';
   for (const id of ['gl3d', 'ov3d', 'glcam', 'ovcam', 'hint3d']) $(id).style.display = use3d ? 'block' : 'none';
@@ -268,8 +275,43 @@ function wire() {
   $('cards').onclick = (e) => { const el = e.target.closest('.tcard'); if (!el) return; S.sel = +el.dataset.i; buildCards(); updateCards(); };
   $('optTruth').onchange = (e) => { S.showTruth = e.target.checked; };
   $('viewsw').onclick = (e) => { const v = e.target.dataset.v; if (!v) return; S.view = v; [...$('viewsw').children].forEach((b) => b.classList.toggle('on', b === e.target)); };
+  // ---- what-if panel: sliders show live values; Apply restarts the same scenario/seed with the overrides
+  const W_KEYS = ['pd', 'clutter', 'targets', 'lowFrac'];
+  const syncWhatIf = () => {
+    const c = { ...MOT_SCENARIOS[S.scenario], ...S.overrides };
+    for (const k of W_KEYS) { $('w-' + k).value = c[k] ?? (k === 'lowFrac' ? 0.35 : 0); $('wv-' + k).textContent = (+$('w-' + k).value).toString(); }
+    $('w-shadows').checked = !!c.shadows;
+  };
+  for (const k of W_KEYS) $('w-' + k).oninput = (e) => { $('wv-' + k).textContent = e.target.value; };
+  $('w-apply').onclick = () => {
+    S.overrides = Object.fromEntries(W_KEYS.map((k) => [k, +$('w-' + k).value]));
+    S.overrides.shadows = $('w-shadows').checked;
+    newSession(); pushFeed(`What-if applied: detection ${S.overrides.pd}, false alarms ${S.overrides.clutter}/frame, ${S.overrides.targets} people, ${Math.round(S.overrides.lowFrac * 100)}% low rocks, shadows ${S.overrides.shadows ? 'on' : 'off'}`, '');
+  };
+  $('w-reset').onclick = () => { S.overrides = {}; syncWhatIf(); newSession(); };
+  const oldScenario = $('scenario').onchange;
+  $('scenario').onchange = (e) => { S.overrides = {}; oldScenario(e); syncWhatIf(); };
+  syncWhatIf();
+  $('tourBtn').onclick = () => runTour({
+    prepare() { S.view = '3d'; [...$('viewsw').children].forEach((b) => b.classList.toggle('on', b.dataset.v === '3d')); S.sel = 0; S.paused = false; newSession(); },
+    showNaive() { S.sel = 2; buildCards(); },
+    polar() { S.scenario = 'polar'; $('scenario').value = 'polar'; S.overrides = {}; syncWhatIf(); newSession(); },
+  }, TRACK_TOUR);
   window.onkeydown = (e) => { if (e.key === ' ' && e.target.tagName !== 'INPUT') { e.preventDefault(); $('play').click(); } };
 }
+
+const TRACK_TOUR = (api) => [
+  { at: '#goal', title: '1 · The question', text: 'When an astronaut walks behind a boulder, does the tracker give them back the <b>same ID</b> when they reappear? A new ID means the system thinks there are now two people: an <b>ID switch</b>.' },
+  { at: '#mapwrap', title: '2 · The world (real NASA models)', text: 'The white <b>astronauts</b> are where people really are; only training views show this. The coloured <b>rings and #tags</b> are what the selected tracker believes. A shaded <b>search area</b> means "lost sight, probably in here". Drag to orbit.' },
+  { at: '#camwrap', title: '3 · What the robot actually sees', text: 'Rendered from the 2.2 m camera mast with real depth. Tall rocks hide people completely; low rocks only hide legs. A <b>dashed box</b> is the tracker saying "I think someone is behind this rock".' },
+  { at: '#cards', title: '4 · Three trackers, one difference', text: 'All three get identical detections. They differ only in how they treat a missed detection. The big number is <b>% of IDs kept</b> through 1–5 s occlusions. The naive tracker deletes anyone it cannot see.', action: { label: 'Show the naive tracker on the map', run: () => api.showNaive() } },
+  { at: '#feed', title: '5 · The story, live', text: 'Every disappearance and reappearance is narrated, with a ✔ (same ID) or ✘ (new ID) verdict for each tracker.' },
+  { at: '#chSw', title: '6 · Watch the gap open', text: 'Cumulative ID switches per tracker. Over a few minutes the red (naive) line usually climbs fastest, but single runs are noisy: the README reports 20-run averages with confidence intervals.' },
+  { at: '#scenario', title: '7 · A second kind of occlusion', text: 'At the lunar south pole the sun hugs the horizon, so boulders cast very long shadows. People in shadow are in line of sight but too dark to detect.', action: { label: '🌑 Switch to South pole · Long shadows', run: () => api.polar() } },
+  { at: '#whatif', title: '8 · Your experiments', text: 'Change the world: detection rate, false alarms, crowd size, low rocks, shadows. Press Apply and see which tracker suffers. Every exercise in the guide uses these controls.' },
+  { at: '#viewsw', title: '9 · The map view', text: 'Top-down map: dark wedges show exactly where the camera is blind. Useful to understand <i>why</i> someone disappeared.' },
+  { at: null, title: 'Go deeper', text: 'The <b>📘 Guide</b> button explains each idea in plain words, then the maths, then the exact code, then the paper behind it (all references verified). Every number in the README can be regenerated with one command.' },
+];
 
 wire(); newSession(); requestAnimationFrame(frame);
 // 3-D view loads on its own: if WebGL or the models are unavailable, the 2-D views keep working.

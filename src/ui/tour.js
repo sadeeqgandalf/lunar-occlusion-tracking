@@ -31,9 +31,9 @@ const STEPS = (api) => [
     text: `<b>Command → watch Health → something breaks → decide: continue, slow, stop, or re-localise.</b> Press <b>? Learn</b> for guided experiments and a plain-English glossary, or read <code>docs/GUIDE.md</code>. Press <b>Reset</b> to start fresh.` },
 ];
 
-export function runTour(api) {
-  api.prepare(); // fresh paused rover mission
-  const steps = STEPS(api);
+export function runTour(api, makeSteps = STEPS) {
+  api.prepare(); // fresh, paused starting state
+  const steps = makeSteps(api);
   const root = document.createElement('div'); root.id = 'tour';
   root.innerHTML = '<div class="tour-hole"></div><div class="tour-card"></div>';
   document.body.appendChild(root);
