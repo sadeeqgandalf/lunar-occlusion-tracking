@@ -90,3 +90,11 @@ test('polar scenario: people actually vanish into shadow while still in line of 
   for (let i = 0; i < 1500; i++) { s.step(); for (const t of s.world.targets) if (t.vis.inFov && t.vis.visFrac >= 0.25 && t.vis.pd < 0.15) shadowHidden++; }
   assert.ok(shadowHidden > 0, 'expected some shadow-only occlusion in 150 s');
 });
+
+test('hidden-cause wording: shadow only when shadow is measured, never in shadow-free scenes', async () => {
+  const { hiddenCause } = await import('../src/mot/occlusion.js');
+  assert.equal(hiddenCause({ visFrac: 0.3, shadow: 0 }), 'rock');          // a sliver visible behind a rock
+  assert.equal(hiddenCause({ visFrac: 1, shadow: 1 }), 'shadow');
+  const s = new MotSession({ scenario: 'boulders', seed: 4 });
+  for (let i = 0; i < 800; i++) { s.step(); for (const t of s.world.targets) assert.notEqual(hiddenCause(t.vis), 'shadow'); }
+});

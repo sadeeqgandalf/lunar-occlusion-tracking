@@ -86,3 +86,6 @@ export function detectionProb(inFov, visFrac, pdMax, shadowFrac = 0) {
 
 /** "Hidden" for scoring and display: in view of the camera's field, but effectively undetectable. */
 export const isHidden = (v) => v.inFov && (v.pd ?? (v.visFrac >= 0.25 ? 1 : 0)) < 0.15;
+
+/** Why a hidden person is hidden, for display: measured cast-shadow darkness, otherwise the rock in the way. */
+export const hiddenCause = (v) => ((v.shadow ?? 0) > 0.3 ? 'shadow' : 'rock');

@@ -2,24 +2,11 @@
 // The simulation stays the source of truth; this module only draws it:
 //   sim ground (x, y) -> three (x, 0, -y), y-up. Heights in metres.
 // Official NASA models (assets/nasa): astronaut, RASSOR (camera robot), Apollo Lunar Module.
-import * as THREE from 'three';
-import { GLTFLoader } from '../../vendor/three/examples/jsm/loaders/GLTFLoader.js';
-import { DRACOLoader } from '../../vendor/three/examples/jsm/loaders/DRACOLoader.js';
+import { THREE, toV, hash, fbm, makeRenderer, fitRenderer, loadModel, starfield, drawLabels } from './three-common.js';
 import { OrbitControls } from '../../vendor/three/examples/jsm/controls/OrbitControls.js';
-import { isHidden } from '../mot/occlusion.js';
+import { isHidden, hiddenCause } from '../mot/occlusion.js';
 
 const MAST_H = 2.2, PERSON_H = 1.8;
-const toV = (x, y, h = 0) => new THREE.Vector3(x, h, -y);
-
-// ---------- deterministic noise for terrain and rock shapes
-const hash = (x, y) => { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); };
-const smooth = (t) => t * t * (3 - 2 * t);
-function vnoise(x, y) {
-  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi;
-  const a = hash(xi, yi), b = hash(xi + 1, yi), c = hash(xi, yi + 1), d = hash(xi + 1, yi + 1), u = smooth(xf), v = smooth(yf);
-  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
-}
-const fbm = (x, y) => { let s = 0, a = 0.5, f = 1; for (let o = 0; o < 4; o++) { s += a * vnoise(x * f, y * f); a *= 0.5; f *= 2.1; } return s; };
 
 /** Ground height: gentle regolith undulation (kept <~0.3 m inside the work area so the planar sim stays valid) + scenery craters outside it. */
 function makeHeight(craters) {
@@ -33,27 +20,8 @@ function makeHeight(craters) {
   };
 }
 
-function loadModel(loader, url, targetSize, axis = 'y') {
-  return new Promise((res) => loader.load(url, (g) => {
-    const root = g.scene, box = new THREE.Box3().setFromObject(root), size = new THREE.Vector3(), ctr = new THREE.Vector3();
-    box.getSize(size); box.getCenter(ctr);
-    const k = targetSize / (axis === 'y' ? size.y : Math.max(size.x, size.z));
-    root.scale.setScalar(k);
-    root.position.set(-ctr.x * k, -box.min.y * k, -ctr.z * k);
-    root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
-    const holder = new THREE.Group(); holder.add(root); res(holder);
-  }, undefined, () => res(null)));
-}
-
 export async function createWorld3D({ mainCanvas, mainOverlay, camCanvas, camOverlay }) {
-  const mk = (canvas) => {
-    const r = new THREE.WebGLRenderer({ canvas, antialias: true });
-    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap;
-    r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.15; r.outputColorSpace = THREE.SRGBColorSpace;
-    return r;
-  };
-  const R1 = mk(mainCanvas), R2 = mk(camCanvas);
+  const R1 = makeRenderer(mainCanvas), R2 = makeRenderer(camCanvas);
   const scene = new THREE.Scene(); scene.background = new THREE.Color(0x000000);
 
   // lunar south-pole lighting: sun ~7 deg above the horizon -> long shadows; faint earthshine fill
@@ -65,20 +33,15 @@ export async function createWorld3D({ mainCanvas, mainOverlay, camCanvas, camOve
   scene.add(new THREE.HemisphereLight(0x8fa8ff, 0x202020, 0.12));
 
   // stars + Earth low on the horizon (as seen from the lunar south pole)
-  const sp = new Float32Array(3000 * 3);
-  for (let i = 0; i < 3000; i++) { const u = Math.random() * 2 - 1, t = Math.random() * Math.PI * 2, r = 600, s = Math.sqrt(1 - u * u); sp.set([r * s * Math.cos(t), Math.abs(r * u) * 0.9 + 5, r * s * Math.sin(t)], i * 3); }
-  const sg = new THREE.BufferGeometry(); sg.setAttribute('position', new THREE.BufferAttribute(sp, 3));
-  scene.add(new THREE.Points(sg, new THREE.PointsMaterial({ color: 0xffffff, size: 1.2, sizeAttenuation: false })));
+  scene.add(starfield());
   const earth = new THREE.Mesh(new THREE.SphereGeometry(18, 48, 32), new THREE.MeshStandardMaterial({ color: 0x3a6ea5, emissive: 0x0c2340, roughness: 0.8 }));
   earth.position.set(140, 30, -420); scene.add(earth);
 
   // models
-  const draco = new DRACOLoader(); draco.setDecoderPath('vendor/three/examples/jsm/libs/draco/gltf/');
-  const loader = new GLTFLoader(); loader.setDRACOLoader(draco);
   const [astro, rassor, lm] = await Promise.all([
-    loadModel(loader, 'assets/nasa/astronaut.glb', PERSON_H),
-    loadModel(loader, 'assets/nasa/rassor.glb', 1.7, 'xz'),
-    loadModel(loader, 'assets/nasa/apollo_lunar_module.glb', 7.0),
+    loadModel('assets/nasa/astronaut.glb', PERSON_H),
+    loadModel('assets/nasa/rassor.glb', 1.7, 'xz'),
+    loadModel('assets/nasa/apollo_lunar_module.glb', 7.0),
   ]);
 
   const dyn = new THREE.Group(); scene.add(dyn);
@@ -157,32 +120,6 @@ export async function createWorld3D({ mainCanvas, mainOverlay, camCanvas, camOve
   const getPool = (kind, make) => { const i = (pool[kind].used = (pool[kind].used || 0) + 1) - 1; if (!pool[kind][i]) { pool[kind][i] = make(); dyn.add(pool[kind][i]); } pool[kind][i].visible = true; return pool[kind][i]; };
   const resetPools = () => { for (const k of Object.keys(pool)) { pool[k].used = 0; for (const m of pool[k]) m.visible = false; } };
 
-  function size(r, canvas, cam) {
-    const w = canvas.clientWidth, h = canvas.clientHeight;
-    if (!w || !h) return false;
-    const pr = r.getPixelRatio();
-    if (canvas.width !== Math.floor(w * pr) || canvas.height !== Math.floor(h * pr)) r.setSize(w, h, false);
-    cam.aspect = w / h; cam.updateProjectionMatrix(); return true;
-  }
-
-  /** Draw labels/tags on a 2-D overlay over a WebGL view. */
-  function overlay(ov, cam, items) {
-    const dpr = window.devicePixelRatio || 1, w = ov.clientWidth, h = ov.clientHeight;
-    if (ov.width !== Math.round(w * dpr) || ov.height !== Math.round(h * dpr)) { ov.width = Math.round(w * dpr); ov.height = Math.round(h * dpr); }
-    const c = ov.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, w, h);
-    for (const it of items) {
-      const v = it.p.clone().project(cam);
-      if (v.z > 1 || v.z < -1 || Math.abs(v.x) > 1.05 || Math.abs(v.y) > 1.05) continue;
-      const x = (v.x * 0.5 + 0.5) * w, y = (-v.y * 0.5 + 0.5) * h;
-      c.font = it.font || 'bold 12px system-ui'; const tw = c.measureText(it.text).width + 12;
-      c.globalAlpha = it.alpha ?? 1;
-      c.beginPath(); c.roundRect(x - tw / 2, y - 20, tw, 19, 9.5);
-      if (it.dashed) { c.fillStyle = '#0a0e16dd'; c.fill(); c.setLineDash([3, 3]); c.strokeStyle = it.color; c.lineWidth = 1.5; c.stroke(); c.setLineDash([]); c.fillStyle = it.color; }
-      else { c.fillStyle = it.bg || it.color; c.fill(); c.fillStyle = it.fg || '#06101a'; }
-      c.textAlign = 'center'; c.fillText(it.text, x, y - 6); c.textAlign = 'left'; c.globalAlpha = 1;
-    }
-  }
-
   function render(sess, { sel, color, showTruth, marks = [] }) {
     if (!world || sess.world !== world) setWorld(sess.world);
     const w = sess.world, col = new THREE.Color(color);
@@ -196,7 +133,7 @@ export async function createWorld3D({ mainCanvas, mainOverlay, camCanvas, camOve
       g.visible = true;
       const hid = !t.vis.inFov || isHidden(t.vis);
       // the 3-D model IS the truth; only hidden people get a label, at their feet, so it never collides with the tracker's tag
-      if (showTruth && hid) labels1.push({ p: toV(t.x, t.y, height(t.x, t.y) - 0.2), text: `person ${t.id} · ${t.vis.visFrac >= 0.25 ? 'in shadow' : 'behind rock'}`, color: '#ffffff', bg: '#e8ecf2cc', font: '11px system-ui', alpha: 0.9 });
+      if (showTruth && hid) labels1.push({ p: toV(t.x, t.y, height(t.x, t.y) - 0.2), text: `person ${t.id} · ${hiddenCause(t.vis) === 'shadow' ? 'in shadow' : 'behind rock'}`, color: '#ffffff', bg: '#e8ecf2cc', font: '11px system-ui', alpha: 0.9 });
     }
     // camera pings (orange discs on the ground)
     sess.last.dets.forEach((d) => {
@@ -228,15 +165,15 @@ export async function createWorld3D({ mainCanvas, mainOverlay, camCanvas, camOve
     // rover camera: at the mast head, looking along the simulated optical axis, same horizontal field of view
     const cam = w.cam, eye = toV(cam.x, cam.y, height(cam.x, cam.y) + MAST_H);
     roverCam.position.copy(eye); roverCam.lookAt(eye.clone().add(new THREE.Vector3(Math.cos(cam.th), -0.05, -Math.sin(cam.th))));
-    if (size(R2, camCanvas, roverCam)) {
+    if (fitRenderer(R2, camCanvas, roverCam)) {
       roverCam.fov = (2 * Math.atan(Math.tan(cam.fov / 2) / roverCam.aspect) * 180) / Math.PI; roverCam.updateProjectionMatrix();
       for (const p of people.values()) p.visible = true;
       const rings = [...pool.ring, ...pool.area, ...pool.ping]; rings.forEach((m) => { m.userData.v = m.visible; m.visible = false; }); // camera image = the scene only
       R2.render(scene, roverCam); rings.forEach((m) => { m.visible = m.userData.v; });
-      overlay(camOverlay, roverCam, labels2);
+      drawLabels(camOverlay, roverCam, labels2);
     }
     for (const p of people.values()) p.visible = showTruth;
-    if (size(R1, mainCanvas, free)) { controls.update(); R1.render(scene, free); overlay(mainOverlay, free, labels1); }
+    if (fitRenderer(R1, mainCanvas, free)) { controls.update(); R1.render(scene, free); drawLabels(mainOverlay, free, labels1); }
   }
 
   return { render, setWorld, ok: !!(astro && rassor) };

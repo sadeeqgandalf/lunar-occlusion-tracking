@@ -3,7 +3,7 @@
 import { MotSession } from '../mot/session.js';
 import { MOT_SCENARIOS } from '../mot/world.js';
 import { wrapAngle, TAU } from '../core/linalg.js';
-import { isHidden } from '../mot/occlusion.js';
+import { isHidden, hiddenCause } from '../mot/occlusion.js';
 
 const $ = (id) => document.getElementById(id);
 const S = { scenario: 'boulders', seed: 7, speed: 2, paused: false, sel: 0, showTruth: true, view: '3d' };
@@ -34,7 +34,7 @@ function updateFeed() {
   const W = sess.world;
   for (const g of W.targets) {
     const hid = isHidden(g.vis), was = prevHidden.get(g.id);
-    if (hid && was === false) pushFeed(g.vis.visFrac >= 0.25 ? `Crew ${g.id} walked into deep shadow (in plain view, but too dark to detect)` : `Crew ${g.id} went behind a boulder`, 'hide');
+    if (hid && was === false) pushFeed(hiddenCause(g.vis) === 'shadow' ? `Crew ${g.id} walked into deep shadow (in line of sight, but too dark to detect)` : `Crew ${g.id} went behind a boulder`, 'hide');
     prevHidden.set(g.id, hid);
   }
   sess.runs.forEach((r, i) => {
@@ -161,7 +161,7 @@ function drawMap() {
     const [px, py] = P(t.x, t.y), hid = !t.vis.inFov || isHidden(t.vis);
     if (t.trail.length > 1) { c.strokeStyle = '#ffffff26'; c.lineWidth = 1.5; c.setLineDash([2, 4]); c.beginPath(); t.trail.forEach(([x, y], i) => { const q = P(x, y); i ? c.lineTo(...q) : c.moveTo(...q); }); c.stroke(); c.setLineDash([]); }
     drawAstronaut(c, px, py, r, t.h, hid ? 0.45 : 1);
-    c.fillStyle = hid ? '#ffffff99' : '#ffffffdd'; c.font = '11px system-ui'; c.fillText(hid ? `person ${t.id} · ${t.vis.visFrac >= 0.25 ? 'in shadow' : 'behind rock'}` : `person ${t.id}`, px - r, py + r + 13);
+    c.fillStyle = hid ? '#ffffff99' : '#ffffffdd'; c.font = '11px system-ui'; c.fillText(hid ? `person ${t.id} · ${hiddenCause(t.vis) === 'shadow' ? 'in shadow' : 'behind rock'}` : `person ${t.id}`, px - r, py + r + 13);
   }
   // camera pings this frame (orange); in training view, false alarms are tagged
   sess.last.dets.forEach((d, i) => {
