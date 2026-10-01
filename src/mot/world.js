@@ -6,7 +6,7 @@ import { visibility, detectionProb } from './occlusion.js';
 export const MOT_SCENARIOS = {
   boulders: { label: 'Artemis EVA · Boulder field', blurb: 'Five crew/rovers walk through a boulder field. They keep disappearing behind rocks.', targets: 5, boulders: 9, pd: 0.95, clutter: 0.8 },
   crossing: { label: 'Worksite · Crossing paths', blurb: 'Eight targets, paths cross often behind cover. Hardest for keeping identities.', targets: 8, boulders: 7, pd: 0.92, clutter: 1.2 },
-  open: { label: 'Open plain · Control', blurb: 'Almost no cover. Both trackers should do equally well: the control experiment.', targets: 5, boulders: 1, pd: 0.95, clutter: 0.8 },
+  open: { label: 'Open plain · Sparse cover', blurb: 'A single boulder: fewer, shorter occlusions. Shows how results scale with how much cover there is.', targets: 5, boulders: 1, pd: 0.95, clutter: 0.8 },
 };
 
 export const CAMERA = {
