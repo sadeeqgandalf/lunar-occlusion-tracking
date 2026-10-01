@@ -1,0 +1,30 @@
+// One experiment run: a world, its detections, and several trackers scored on the SAME detections.
+import { MotWorld } from './world.js';
+import { Tracker } from './tracker.js';
+import { MotMetrics } from './metrics.js';
+
+export class MotSession {
+  constructor({ scenario = 'boulders', seed = 7, overrides = {}, trackerParams = {} } = {}) {
+    this.world = new MotWorld(scenario, seed, overrides);
+    const W = this.world, pd = W.cfg.pd, clutter = W.cfg.clutter;
+    // Ablation: identical trackers except for how they treat occlusion.
+    this.runs = [
+      { occlusionAware: true, negInfo: true },
+      { occlusionAware: true, negInfo: false },
+      { occlusionAware: false },
+    ].map((v) => ({ tracker: new Tracker(W.cam, W.boulders, { ...v, pd, clutter, ...trackerParams }), metrics: new MotMetrics() }));
+    this.last = { dets: [], gt: [] };
+  }
+  step() {
+    const W = this.world;
+    W.step();
+    const { dets, gt } = W.sense();
+    this.last = { dets, gt };
+    for (const r of this.runs) {
+      r.tracker.step(dets.map((d) => ({ range: d.range, bearing: d.bearing }))); // tracker never sees identities
+      r.metrics.update(W, r.tracker);
+    }
+  }
+  run(seconds) { const n = Math.round(seconds / this.world.dt); for (let i = 0; i < n; i++) this.step(); return this; }
+  summaries() { return this.runs.map((r) => ({ name: r.tracker.name, ...r.metrics.summary() })); }
+}
