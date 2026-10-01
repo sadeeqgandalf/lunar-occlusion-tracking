@@ -56,7 +56,7 @@ Brackets are Wilson 95% intervals; ± is 1.96 × standard error over seeds. All 
 
 ![Mission control in 3-D: NASA's Perseverance model on Mars terrain, each estimator's belief as a coloured marker with its 95% uncertainty disc, navigation health and scoreboard](docs/img/mission-control-3d.png)
 
-The rover platform now renders in **3-D with NASA's official Mars 2020 Perseverance model**. Craters are real depressions at the hazard positions, beacons are navigation posts, and samples are flags. Each estimator's belief is a coloured marker with its 95% uncertainty disc on the ground. An estimator's name appears when it disagrees with the steering estimator by more than 2 m. Click the ground to send a waypoint. The 2-D map, jet and spacecraft platforms remain available.
+The rover platform now renders in **3-D with NASA's official Mars 2020 Perseverance model**. Craters are real depressions at the hazard positions, beacons are navigation posts, and samples are flags. Each estimator's belief is a coloured marker with its 95% uncertainty disc on the ground. An estimator's name appears when it disagrees with the steering estimator by more than 2 m. Click the ground to send a waypoint. The spacecraft platform renders **rendezvous and docking with NASA's Gateway**: the Gateway model at the docking target, NASA's ESAS crew module (Orion's design predecessor) as the chaser, tumbling debris fields, approach gates as hoops, and the Moon below. The Gateway file was compressed from 66 MB to 3.8 MB for the web (details in `assets/nasa/README.md`). The fighter jet has no NASA model, so it stays on the 2-D map rather than using an invented one.
 
 `index.html` is an ego-navigation lab. Fly a **Mars rover, a fighter jet or a spacecraft** (Clohessy-Wiltshire docking) through injected faults while dead reckoning, EKF, UKF and a particle filter estimate the vehicle's own state on the same sensor stream. It includes:
 * an onboard-only **Navigation Health** monitor;
@@ -87,7 +87,7 @@ Modelling the disturbances as states (wheel slip, wind, accelerometer bias) fixe
 5. **IMM motion models** for turning targets.
 
 ## Credits
-* **3-D models:** NASA 3D Resources (https://github.com/nasa/NASA-3D-Resources): Astronaut, RASSOR, Apollo Lunar Module, Mars 2020 Perseverance. NASA states these assets are free and without copyright, and their use follows NASA's media usage guidelines. Details: [`assets/nasa/README.md`](assets/nasa/README.md). **No NASA endorsement of this project is implied.**
+* **3-D models:** NASA 3D Resources (https://github.com/nasa/NASA-3D-Resources): Astronaut, RASSOR, Apollo Lunar Module, Mars 2020 Perseverance, Gateway, ESAS Crew Module. Model scales are set to approximate real-world sizes. NASA states these assets are free and without copyright, and their use follows NASA's media usage guidelines. Details: [`assets/nasa/README.md`](assets/nasa/README.md). **No NASA endorsement of this project is implied.**
 * **Rendering:** Three.js r169 (MIT), vendored in `vendor/three/` so the app runs offline.
 
 ## Limitations (so you can trust the rest)
@@ -105,7 +105,7 @@ src/models      rover · jet · spacecraft estimation models
 src/filters     DR, EKF, UKF, particle filter
 src/platforms   truth dynamics + sensors + autopilot per vehicle
 src/sim         mission engine, scenarios, metrics
-src/ui          both labs' front ends (track.js = Occlusion Lab, world3d.js = 3-D view)
+src/ui          both labs' front ends (track.js = Occlusion Lab; world3d / mars3d / space3d = 3-D views; three-common = shared)
 assets/nasa     official NASA 3-D models (see its README for terms)
 vendor/three    Three.js r169 (MIT), loaders + Draco decoder
 experiments/    reproducible occlusion ablation + results.md

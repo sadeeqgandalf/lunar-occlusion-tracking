@@ -60,6 +60,22 @@ export function loadModel(url, targetSize, axis = 'y') {
   }, undefined, () => res(null)));
 }
 
+/**
+ * A soft studio-like environment so PBR metals (NASA models use them) have something to reflect.
+ * Without it, metallic surfaces render nearly black. Built procedurally: no extra asset files.
+ */
+export function makeEnvironment(renderer, top = 0xbfd6ff, bottom = 0x1a1a1a) {
+  const env = new THREE.Scene(), g = new THREE.SphereGeometry(50, 32, 16), pos = g.attributes.position, col = new Float32Array(pos.count * 3);
+  const ct = new THREE.Color(top), cb = new THREE.Color(bottom), c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) { const t = (pos.getY(i) / 50 + 1) / 2; c.copy(cb).lerp(ct, Math.pow(t, 1.5)); col.set([c.r, c.g, c.b], i * 3); }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  env.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+  const panel = new THREE.Mesh(new THREE.PlaneGeometry(30, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  panel.position.set(20, 25, 20); panel.lookAt(0, 0, 0); env.add(panel); // a bright "sun" panel for highlights
+  const pm = new THREE.PMREMGenerator(renderer), tex = pm.fromScene(env, 0.04).texture; pm.dispose();
+  return tex;
+}
+
 export function starfield(n = 3000, r = 600) {
   const sp = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) { const u = hash(i, 1) * 2 - 1, t = hash(i, 2) * Math.PI * 2, s = Math.sqrt(1 - u * u); sp.set([r * s * Math.cos(t), Math.abs(r * u) * 0.9 + 5, r * s * Math.sin(t)], i * 3); }

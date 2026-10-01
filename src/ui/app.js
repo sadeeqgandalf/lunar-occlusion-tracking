@@ -16,7 +16,10 @@ const S = {
   ui: { showTruth: true, showCov: true, showParticles: true, colors: {} }, keys: {},
   safing: true, delay: 0, view: '3d',
 };
-let mars = null; // 3-D Mars view (loaded on its own; the 2-D map always works)
+const views3d = {}; // platform id -> 3-D view (each loads on its own; the 2-D map always works)
+const VIEW3D_LABEL = { rover: '3D · NASA Perseverance', spacecraft: '3D · NASA Gateway' };
+// one WebGL canvas per 3-D view: two renderers sharing a canvas share one GL context and corrupt each other's state
+const VIEW3D_CANVAS = { rover: 'gl3d', spacecraft: 'gl3dS' };
 let m, view;
 
 const colorsNow = () => { for (const c of listFilters()) S.ui.colors[c.id] = c.color; };
@@ -146,10 +149,12 @@ function frame(now) {
     while (acc >= m.dt && n < 800) { m.step(); acc -= m.dt; n++; }
     if (n === 800) acc = 0;
   }
-  const use3d = S.view === '3d' && mars && m.platform.id === 'rover';
-  $('map').style.display = use3d ? 'none' : 'block'; $('gl3d').style.display = $('ov3d').style.display = use3d ? 'block' : 'none';
-  $('viewsw').style.display = mars && m.platform.id === 'rover' ? 'flex' : 'none';
-  if (use3d) mars.render(m, S.ui); else view.draw(m, S.ui);
+  const v3 = views3d[m.platform.id], use3d = S.view === '3d' && !!v3;
+  $('map').style.display = use3d ? 'none' : 'block'; $('ov3d').style.display = use3d ? 'block' : 'none';
+  for (const [pid, cid] of Object.entries(VIEW3D_CANVAS)) $(cid).style.display = use3d && pid === m.platform.id ? 'block' : 'none';
+  $('viewsw').style.display = v3 ? 'flex' : 'none';
+  if (v3 && $('viewsw').firstElementChild.textContent !== VIEW3D_LABEL[m.platform.id]) $('viewsw').firstElementChild.textContent = VIEW3D_LABEL[m.platform.id];
+  if (use3d) v3.render(m, S.ui); else view.draw(m, S.ui);
   if (now - hudT > 150) { hudT = now; updateHud(); }
   if (now - chT > 300) { chT = now; updateCharts(); }
   requestAnimationFrame(frame);
@@ -241,11 +246,12 @@ function wire() {
   $('viewsw').onclick = (e) => { const v = e.target.dataset.v; if (!v) return; S.view = v; [...$('viewsw').children].forEach((b) => b.classList.toggle('on', b === e.target)); if (v === '2d') setTimeout(() => view.resize(), 0); };
   // 3-D: click the ground (without dragging) to send a waypoint; near a flag = target that sample
   let down3d = null;
-  $('gl3d').addEventListener('pointerdown', (e) => { down3d = { x: e.offsetX, y: e.offsetY }; });
-  $('gl3d').addEventListener('pointerup', (e) => {
-    if (!down3d || !mars || Math.hypot(e.offsetX - down3d.x, e.offsetY - down3d.y) > 5) { down3d = null; return; }
+  for (const cid of Object.values(VIEW3D_CANVAS)) $(cid).addEventListener('pointerdown', (e) => { down3d = { x: e.offsetX, y: e.offsetY }; });
+  for (const cid of Object.values(VIEW3D_CANVAS)) $(cid).addEventListener('pointerup', (e) => {
+    const v3 = views3d[m.platform.id];
+    if (!down3d || !v3 || Math.hypot(e.offsetX - down3d.x, e.offsetY - down3d.y) > 5) { down3d = null; return; }
     down3d = null;
-    const p = mars.pick(e.offsetX, e.offsetY); if (!p) return;
+    const p = v3.pick(e.offsetX, e.offsetY); if (!p) return;
     const near = m.targets.find((t) => !t.done && Math.hypot(t.x - p.x, t.y - p.y) < 3);
     m.issue(near ? { type: 'goto', x: near.x, y: near.y, kind: 'objective', targetId: near.id } : { type: 'goto', x: p.x, y: p.y, kind: 'goto' });
   });
@@ -288,10 +294,12 @@ function exportCsv() {
 // ------------------------------------------------------------------ boot
 view = new MapView($('map'));
 buildSelectors(); wire();
-import('./mars3d.js')
-  .then((mod) => mod.createMars3D({ canvas: $('gl3d'), overlay: $('ov3d') }))
-  .then((v) => { mars = v; })
-  .catch((err) => { console.warn('3-D view unavailable, using the map:', err); S.view = '2d'; });
+for (const [id, file, fn] of [['rover', './mars3d.js', 'createMars3D'], ['spacecraft', './space3d.js', 'createSpace3D']]) {
+  import(file)
+    .then((mod) => mod[fn]({ canvas: $(VIEW3D_CANVAS[id]), overlay: $('ov3d') }))
+    .then((v) => { views3d[id] = v; })
+    .catch((err) => console.warn(`3-D ${id} view unavailable, using the map:`, err));
+}
 requestAnimationFrame(() => {
   view.resize(); newMission(); requestAnimationFrame(frame);
   const demo = new URLSearchParams(location.search).has('demo');

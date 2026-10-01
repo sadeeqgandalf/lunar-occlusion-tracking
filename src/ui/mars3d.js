@@ -138,6 +138,7 @@ export async function createMars3D({ canvas, overlay }) {
         const n = pool.disc.used++;
         if (!pool.disc[n]) { pool.disc[n] = new THREE.Mesh(new THREE.CircleGeometry(1, 48), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide })); dyn.add(pool.disc[n]); }
         const d = pool.disc[n]; d.visible = true; d.material.color.copy(color);
+        d.material.opacity = 0.22 * Math.min(1, 10 / Math.max(k * Math.sqrt(e.l1), 1)); // large uncertainty fades
         d.rotation.set(-Math.PI / 2, 0, e.angle); d.scale.set(Math.max(0.3, k * Math.sqrt(e.l1)), Math.max(0.3, k * Math.sqrt(e.l2)), 1);
         d.position.copy(toV(pose.x, pose.y, g + 0.08 + n * 0.01));
       }
