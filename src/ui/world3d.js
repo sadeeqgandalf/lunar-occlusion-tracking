@@ -123,6 +123,9 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
   const free = new THREE.PerspectiveCamera(45, 1, 0.1, 2000);
   free.position.set(7, 11, 9);   // just behind and above the camera robot, looking into the boulder field
   const controls = new OrbitControls(free, mainEl); // orbit by dragging over the 3-D panel
+  // the panel also holds buttons (3D/Map, full quality): a press that starts on one must not be captured for orbiting,
+  // or its click never fires. Capture phase on the panel runs before OrbitControls' own listener there.
+  mainEl.addEventListener('pointerdown', (e) => { if (e.target.closest('button, a, input, select, label')) e.stopPropagation(); }, true);
   controls.target.set(0, 0.8, -19); controls.enableDamping = true; controls.maxPolarAngle = Math.PI * 0.495; controls.minDistance = 4; controls.maxDistance = 160;
   const roverCam = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
 

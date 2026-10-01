@@ -384,6 +384,9 @@ wire(); newSession(); requestAnimationFrame(frame);
 // 3-D view loads on its own: if WebGL or the models are unavailable, the 2-D views keep working.
 import('./world3d.js')
   .then((m) => m.createWorld3D({ canvas: $('glAll'), mainEl: $('mapwrap'), camEl: $('camwrap'), mainOverlay: $('ov3d'), camOverlay: $('ovcam') }))
-  .then((w) => { w3d = w; $('load3d').remove(); import('./three-common.js').then((c) => { if (c.GFX.low) $('gfxNote').innerHTML = ' · <b>low-power 3D</b> (no shadows) · <a href="?gfx=high" style="color:#7cf">try full quality</a>'; }); })
+  .then((w) => { w3d = w; $('load3d').remove(); import('./three-common.js').then((c) => { if (!c.GFX.low) return;
+      // low-power 3-D is remembered after a GPU reset; this button forgets it and reloads in full quality
+      $('gfxNote').innerHTML = ' · <b>low-power 3D</b> (no shadows) <button id="gfxHigh" style="margin-left:6px;padding:1px 8px;font-size:11.5px;cursor:pointer">Try full quality</button>';
+      $('gfxHigh').onclick = () => { try { localStorage.removeItem('gfx'); } catch {} location.replace(location.pathname); }; }); })
   .catch((err) => { showError('3-D load', err); $('load3d')?.remove(); S.view = '2d'; });
 window.__track = () => sess;
