@@ -1,7 +1,7 @@
 // Mission Control 3-D view (spacecraft platform): rendezvous and docking with NASA's Gateway model.
 // Hill frame -> scene: along-track y_T -> three x (horizontal), radial x_R -> three y (up), out-of-plane = z.
 // Chaser: NASA ESAS crew module (Orion's design predecessor). Model sizes are approximate (see constants).
-import { THREE, hash, fbm, makeRenderer, fitRenderer, loadModel, starfield, drawLabels, makeEnvironment } from './three-common.js';
+import { isLost, THREE, hash, fbm, makeRenderer, fitRenderer, loadModel, starfield, drawLabels, makeEnvironment } from './three-common.js';
 import { OrbitControls } from '../../vendor/three/examples/jsm/controls/OrbitControls.js';
 import { covEllipse } from '../filters/base.js';
 
@@ -116,10 +116,11 @@ export async function createSpace3D({ canvas, overlay }) {
       hoop.material.color.setHex(done ? 0x4ade80 : 0xffd166); hoop.material.emissive.setHex(done ? 0x0f4020 : 0x5a4400);
       labels.push({ p: hoop.position.clone().add(new THREE.Vector3(0, -5.5, 0)), text: `${t.id === m.targets.length ? 'Dock' : `Gate ${t.id}`}${done ? ' ✔' : ''}`, color: done ? '#4ade80' : '#ffd166' });
     }
+    R.toneMappingExposure = 1.1; // the renderer is shared with the other 3-D view on this canvas
     if (fitRenderer(R, canvas, cam)) { controls.update(); R.render(scene, cam); drawLabels(overlay, cam, labels); }
   }
 
   /** Clicking in space has no ground to hit: return null (use the Map view to place waypoints). */
   const pick = () => null;
-  return { render, pick, ok: !!(gateway && capsule) };
+  return { render, pick, ok: !!(gateway && capsule), isLost: () => isLost(R) };
 }

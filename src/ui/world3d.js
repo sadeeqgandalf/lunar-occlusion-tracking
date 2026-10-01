@@ -2,7 +2,7 @@
 // The simulation stays the source of truth; this module only draws it:
 //   sim ground (x, y) -> three (x, 0, -y), y-up. Heights in metres.
 // Official NASA models (assets/nasa): astronaut, RASSOR (camera robot), Apollo Lunar Module.
-import { THREE, toV, hash, fbm, makeRenderer, fitRenderer, loadModel, starfield, drawLabels } from './three-common.js';
+import { THREE, toV, hash, fbm, makeRenderer, fitRenderer, loadModel, starfield, drawLabels, isLost } from './three-common.js';
 import { OrbitControls } from '../../vendor/three/examples/jsm/controls/OrbitControls.js';
 import { isHidden, hiddenCause } from '../mot/occlusion.js';
 
@@ -20,8 +20,12 @@ function makeHeight(craters) {
   };
 }
 
-export async function createWorld3D({ mainCanvas, mainOverlay, camCanvas, camOverlay }) {
-  const R1 = makeRenderer(mainCanvas), R2 = makeRenderer(camCanvas);
+/**
+ * One renderer draws both views (free 3-D view + rover camera) into two viewports of a single canvas that sits
+ * behind both panels: one GPU context instead of two.
+ */
+export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOverlay }) {
+  const R = makeRenderer(canvas);
   const scene = new THREE.Scene(); scene.background = new THREE.Color(0x000000);
 
   // lunar south-pole lighting: sun ~7 deg above the horizon -> long shadows; faint earthshine fill
@@ -113,7 +117,7 @@ export async function createWorld3D({ mainCanvas, mainOverlay, camCanvas, camOve
   // ---------- cameras
   const free = new THREE.PerspectiveCamera(45, 1, 0.1, 2000);
   free.position.set(7, 11, 9);   // just behind and above the camera robot, looking into the boulder field
-  const controls = new OrbitControls(free, mainCanvas);
+  const controls = new OrbitControls(free, mainEl); // orbit by dragging over the 3-D panel
   controls.target.set(0, 0.8, -19); controls.enableDamping = true; controls.maxPolarAngle = Math.PI * 0.495; controls.minDistance = 4; controls.maxDistance = 160;
   const roverCam = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
 
@@ -165,16 +169,27 @@ export async function createWorld3D({ mainCanvas, mainOverlay, camCanvas, camOve
     // rover camera: at the mast head, looking along the simulated optical axis, same horizontal field of view
     const cam = w.cam, eye = toV(cam.x, cam.y, height(cam.x, cam.y) + MAST_H);
     roverCam.position.copy(eye); roverCam.lookAt(eye.clone().add(new THREE.Vector3(Math.cos(cam.th), -0.05, -Math.sin(cam.th))));
-    if (fitRenderer(R2, camCanvas, roverCam)) {
+    if (!fitRenderer(R, canvas, free)) return;
+    if (viewport(camEl, roverCam)) {
       roverCam.fov = (2 * Math.atan(Math.tan(cam.fov / 2) / roverCam.aspect) * 180) / Math.PI; roverCam.updateProjectionMatrix();
       for (const p of people.values()) p.visible = true;
       const rings = [...pool.ring, ...pool.area, ...pool.ping]; rings.forEach((m) => { m.userData.v = m.visible; m.visible = false; }); // camera image = the scene only
-      R2.render(scene, roverCam); rings.forEach((m) => { m.visible = m.userData.v; });
+      R.render(scene, roverCam); rings.forEach((m) => { m.visible = m.userData.v; });
       drawLabels(camOverlay, roverCam, labels2);
     }
     for (const p of people.values()) p.visible = showTruth;
-    if (fitRenderer(R1, mainCanvas, free)) { controls.update(); R1.render(scene, free); drawLabels(mainOverlay, free, labels1); }
+    if (viewport(mainEl, free)) { controls.update(); R.render(scene, free); drawLabels(mainOverlay, free, labels1); }
+    R.setScissorTest(false);
   }
 
-  return { render, setWorld, ok: !!(astro && rassor) };
+  /** Restrict drawing to the part of the shared canvas under `el` (WebGL viewports start bottom-left). */
+  function viewport(el, cam) {
+    const c = canvas.getBoundingClientRect(), r = el.getBoundingClientRect(), w = r.width, h = r.height;
+    if (w < 2 || h < 2) return false;
+    const x = r.left - c.left, y = c.bottom - r.bottom;
+    R.setViewport(x, y, w, h); R.setScissor(x, y, w, h); R.setScissorTest(true);
+    cam.aspect = w / h; cam.updateProjectionMatrix(); return true;
+  }
+
+  return { render, setWorld, ok: !!(astro && rassor), isLost: () => isLost(R) };
 }

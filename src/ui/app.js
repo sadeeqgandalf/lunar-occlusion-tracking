@@ -18,8 +18,9 @@ const S = {
 };
 const views3d = {}; // platform id -> 3-D view (each loads on its own; the 2-D map always works)
 const VIEW3D_LABEL = { rover: '3D · NASA Perseverance', spacecraft: '3D · NASA Gateway' };
-// one WebGL canvas per 3-D view: two renderers sharing a canvas share one GL context and corrupt each other's state
-const VIEW3D_CANVAS = { rover: 'gl3d', spacecraft: 'gl3dS' };
+// Both 3-D views draw on ONE canvas through ONE shared renderer (one GPU context for the page). They are never
+// visible at the same time. (Two *separate* renderers on one canvas corrupt each other; one shared renderer is fine.)
+const views3dLost = {}; // views waiting for the browser to restore the GPU context
 let m, view;
 
 const colorsNow = () => { for (const c of listFilters()) S.ui.colors[c.id] = c.color; };
@@ -150,7 +151,7 @@ function showError(where, err) {
     el.style.cssText = 'position:absolute;left:50%;top:60px;transform:translateX(-50%);z-index:20;max-width:80%;background:#4c1219;color:#ffd7db;border:1px solid #ff5d6c;border-radius:8px;padding:8px 12px;font:12px/1.4 ui-monospace,monospace;user-select:text';
     (document.getElementById('mapwrap') || document.body).appendChild(el);
   }
-  el.textContent = `3-D view stopped, switched to the 2-D map. Error: ${err?.message || err}`;
+  el.textContent = `3-D view paused, showing the 2-D map. ${/context lost/i.test(err?.message || '') ? 'It will come back automatically when the browser restores the GPU. ' : ''}Error: ${err?.message || err}`;
 }
 function frame(now) {
   requestAnimationFrame(frame); // schedule first: one bad frame must never stop the loop
@@ -166,12 +167,14 @@ function frameBody(now) {
   }
   const v3 = views3d[m.platform.id], use3d = S.view === '3d' && !!v3;
   $('map').style.display = use3d ? 'none' : 'block'; $('ov3d').style.display = use3d ? 'block' : 'none';
-  for (const [pid, cid] of Object.entries(VIEW3D_CANVAS)) $(cid).style.display = use3d && pid === m.platform.id ? 'block' : 'none';
+  $('gl3d').style.display = use3d ? 'block' : 'none';
+  const lost = views3dLost[m.platform.id];
+  if (lost && !lost.isLost()) { views3d[m.platform.id] = lost; delete views3dLost[m.platform.id]; S.view = '3d'; [...$('viewsw').children].forEach((b) => b.classList.toggle('on', b.dataset.v === '3d')); document.getElementById('err3d')?.remove(); }
   $('viewsw').style.display = v3 ? 'flex' : 'none';
   if (v3 && $('viewsw').firstElementChild.textContent !== VIEW3D_LABEL[m.platform.id]) $('viewsw').firstElementChild.textContent = VIEW3D_LABEL[m.platform.id];
   if (use3d) {
     try { v3.render(m, S.ui); }
-    catch (err) { showError('3-D view', err); delete views3d[m.platform.id]; S.view = '2d'; [...$('viewsw').children].forEach((b) => b.classList.toggle('on', b.dataset.v === '2d')); setTimeout(() => view.resize(), 0); }
+    catch (err) { showError('3-D view', err); if (v3.isLost?.()) views3dLost[m.platform.id] = v3; delete views3d[m.platform.id]; S.view = '2d'; [...$('viewsw').children].forEach((b) => b.classList.toggle('on', b.dataset.v === '2d')); setTimeout(() => view.resize(), 0); }
   } else view.draw(m, S.ui);
   if (now - hudT > 150) { hudT = now; updateHud(); }
   if (now - chT > 300) { chT = now; updateCharts(); }
@@ -264,8 +267,8 @@ function wire() {
   $('viewsw').onclick = (e) => { const v = e.target.dataset.v; if (!v) return; S.view = v; [...$('viewsw').children].forEach((b) => b.classList.toggle('on', b === e.target)); if (v === '2d') setTimeout(() => view.resize(), 0); };
   // 3-D: click the ground (without dragging) to send a waypoint; near a flag = target that sample
   let down3d = null;
-  for (const cid of Object.values(VIEW3D_CANVAS)) $(cid).addEventListener('pointerdown', (e) => { down3d = { x: e.offsetX, y: e.offsetY }; });
-  for (const cid of Object.values(VIEW3D_CANVAS)) $(cid).addEventListener('pointerup', (e) => {
+  $('gl3d').addEventListener('pointerdown', (e) => { down3d = { x: e.offsetX, y: e.offsetY }; });
+  $('gl3d').addEventListener('pointerup', (e) => {
     const v3 = views3d[m.platform.id];
     if (!down3d || !v3 || Math.hypot(e.offsetX - down3d.x, e.offsetY - down3d.y) > 5) { down3d = null; return; }
     down3d = null;
@@ -314,7 +317,7 @@ view = new MapView($('map'));
 buildSelectors(); wire();
 for (const [id, file, fn] of [['rover', './mars3d.js', 'createMars3D'], ['spacecraft', './space3d.js', 'createSpace3D']]) {
   import(file)
-    .then((mod) => mod[fn]({ canvas: $(VIEW3D_CANVAS[id]), overlay: $('ov3d') }))
+    .then((mod) => mod[fn]({ canvas: $('gl3d'), overlay: $('ov3d') }))
     .then((v) => { views3d[id] = v; })
     .catch((err) => showError(`3-D ${id} load`, err));
 }

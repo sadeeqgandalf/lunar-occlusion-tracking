@@ -18,17 +18,28 @@ export const fbm = (x, y) => { let s = 0, a = 0.5, f = 1; for (let o = 0; o < 4;
 /** Simulator ground (x, y) -> Three.js (x, h, -y), y-up, metres. */
 export const toV = (x, y, h = 0) => new THREE.Vector3(x, h, -y);
 
+const _renderers = new WeakMap();
+/**
+ * One WebGL renderer (= one GPU context) per canvas, shared by every view that draws on it.
+ * Browsers cap live WebGL contexts and drop the oldest under GPU memory pressure, so pages must keep few.
+ */
 export function makeRenderer(canvas, exposure = 1.15) {
-  const r = new THREE.WebGLRenderer({ canvas, antialias: true });
-  r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  if (_renderers.has(canvas)) return _renderers.get(canvas);
+  const r = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+  _renderers.set(canvas, r);
+  r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5)); // retina at 1.5x: ~44% less GPU memory than 2x
   r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap;
   r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = exposure; r.outputColorSpace = THREE.SRGBColorSpace;
   // a lost GPU context (driver reset, sleep/wake, too many 3-D tabs) otherwise leaves a silent blank canvas
   canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); r.userData = { lost: true }; });
+  canvas.addEventListener('webglcontextrestored', () => { r.userData = { lost: false }; }); // three.js re-uploads resources itself
   return r;
 }
 
 /** Resize a renderer to its canvas' CSS box and update the camera aspect. Returns false if not laid out yet. */
+/** True while the browser has taken this renderer's GPU context away. */
+export const isLost = (r) => !!r.userData?.lost;
+
 export function fitRenderer(r, canvas, cam) {
   if (r.userData?.lost) throw new Error('WebGL context lost (GPU reset, sleep/wake or too many 3-D tabs open)');
   const w = canvas.clientWidth, h = canvas.clientHeight;

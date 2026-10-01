@@ -9,7 +9,7 @@ import { lineChart } from './charts.js';
 
 const $ = (id) => document.getElementById(id);
 const S = { scenario: 'boulders', seed: 7, speed: 2, paused: false, sel: 0, showTruth: true, view: '3d', overrides: {}, sw: [] };
-let w3d = null;
+let w3d = null, w3dLost = null; // w3dLost: a 3-D view waiting for the browser to restore its GPU context
 const COLORS = ['#4ade80', '#4cc9f0', '#ff6b6b'];
 const PLAIN = {
   'Aware + neg. info': 'Knows the blind spots AND reasons "I can\'t see them, so they must be behind that rock".',
@@ -258,7 +258,7 @@ function showError(where, err) {
     el.style.cssText = 'position:absolute;left:50%;top:60px;transform:translateX(-50%);z-index:20;max-width:80%;background:#4c1219;color:#ffd7db;border:1px solid #ff5d6c;border-radius:8px;padding:8px 12px;font:12px/1.4 ui-monospace,monospace;user-select:text';
     (document.getElementById('mapwrap') || document.body).appendChild(el);
   }
-  el.textContent = `3-D view stopped, switched to the 2-D map. Error: ${err?.message || err}`;
+  el.textContent = `3-D view paused, showing the 2-D map. ${/context lost/i.test(err?.message || '') ? 'It will come back automatically when the browser restores the GPU. ' : ''}Error: ${err?.message || err}`;
 }
 function frame(now) {
   requestAnimationFrame(frame); // schedule first: one bad frame must never stop the loop
@@ -272,13 +272,18 @@ function frameBody(now) {
   } if (n === 200) acc = 0; }
   const use3d = S.view === '3d' && w3d;
   for (const id of ['map', 'cam']) $(id).style.display = use3d ? 'none' : 'block';
-  for (const id of ['gl3d', 'ov3d', 'glcam', 'ovcam', 'hint3d']) $(id).style.display = use3d ? 'block' : 'none';
+  for (const id of ['glAll', 'ov3d', 'ovcam', 'hint3d']) $(id).style.display = use3d ? 'block' : 'none';
+  if (use3d) { const mw = $('mapwrap'), cw = $('camwrap'), g = $('glAll'); g.style.top = mw.offsetTop + 'px'; g.style.height = (cw.offsetTop + cw.offsetHeight - mw.offsetTop) + 'px'; }
+  if (w3dLost && !w3dLost.isLost()) { // the browser gave the GPU context back: return to 3-D
+    w3d = w3dLost; w3dLost = null; S.view = '3d'; [...$('viewsw').children].forEach((b) => b.classList.toggle('on', b.dataset.v === '3d'));
+    $('err3d')?.remove(); pushFeed('3-D view restored after a GPU reset', '');
+  }
   if (use3d) {
     marks = marks.filter((m) => sess.world.t - m.t < 4);
     try {
       w3d.render(sess, { sel: S.sel, color: COLORS[S.sel], showTruth: S.showTruth, marks: marks.filter((m) => m.run === S.sel).map((m) => ({ ...m, alpha: Math.max(1 - (sess.world.t - m.t) / 4, 0.2) })) });
     } catch (err) { // fall back to the 2-D views and say why
-      showError('3-D view', err); w3d = null; S.view = '2d';
+      showError('3-D view', err); if (w3d.isLost?.()) w3dLost = w3d; w3d = null; S.view = '2d';
       [...$('viewsw').children].forEach((b) => b.classList.toggle('on', b.dataset.v === '2d'));
       // the 2-D canvases become visible on the next frame and are drawn then
     }
@@ -339,7 +344,7 @@ const TRACK_TOUR = (api) => [
 wire(); newSession(); requestAnimationFrame(frame);
 // 3-D view loads on its own: if WebGL or the models are unavailable, the 2-D views keep working.
 import('./world3d.js')
-  .then((m) => m.createWorld3D({ mainCanvas: $('gl3d'), mainOverlay: $('ov3d'), camCanvas: $('glcam'), camOverlay: $('ovcam') }))
+  .then((m) => m.createWorld3D({ canvas: $('glAll'), mainEl: $('mapwrap'), camEl: $('camwrap'), mainOverlay: $('ov3d'), camOverlay: $('ovcam') }))
   .then((w) => { w3d = w; $('load3d').remove(); })
   .catch((err) => { showError('3-D load', err); $('load3d')?.remove(); S.view = '2d'; });
 window.__track = () => sess;
