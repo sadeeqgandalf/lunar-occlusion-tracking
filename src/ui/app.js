@@ -14,8 +14,9 @@ const S = {
   platform: 'rover', scenario: 'nominal', seed: 7, speed: 2, paused: false,
   enabled: new Set(['dr', 'ekf', 'ukf', 'pf']), primary: 'ekf', custom: [],
   ui: { showTruth: true, showCov: true, showParticles: true, colors: {} }, keys: {},
-  safing: true, delay: 0,
+  safing: true, delay: 0, view: '3d',
 };
+let mars = null; // 3-D Mars view (loaded on its own; the 2-D map always works)
 let m, view;
 
 const colorsNow = () => { for (const c of listFilters()) S.ui.colors[c.id] = c.color; };
@@ -145,7 +146,10 @@ function frame(now) {
     while (acc >= m.dt && n < 800) { m.step(); acc -= m.dt; n++; }
     if (n === 800) acc = 0;
   }
-  view.draw(m, S.ui);
+  const use3d = S.view === '3d' && mars && m.platform.id === 'rover';
+  $('map').style.display = use3d ? 'none' : 'block'; $('gl3d').style.display = $('ov3d').style.display = use3d ? 'block' : 'none';
+  $('viewsw').style.display = mars && m.platform.id === 'rover' ? 'flex' : 'none';
+  if (use3d) mars.render(m, S.ui); else view.draw(m, S.ui);
   if (now - hudT > 150) { hudT = now; updateHud(); }
   if (now - chT > 300) { chT = now; updateCharts(); }
   requestAnimationFrame(frame);
@@ -234,6 +238,17 @@ function wire() {
   };
   window.onkeyup = (e) => { const k = KEYMAP[e.key]; if (k && S.keys[k]) { S.keys[k] = false; drive(); } };
   window.onresize = () => view.resize();
+  $('viewsw').onclick = (e) => { const v = e.target.dataset.v; if (!v) return; S.view = v; [...$('viewsw').children].forEach((b) => b.classList.toggle('on', b === e.target)); if (v === '2d') setTimeout(() => view.resize(), 0); };
+  // 3-D: click the ground (without dragging) to send a waypoint; near a flag = target that sample
+  let down3d = null;
+  $('gl3d').addEventListener('pointerdown', (e) => { down3d = { x: e.offsetX, y: e.offsetY }; });
+  $('gl3d').addEventListener('pointerup', (e) => {
+    if (!down3d || !mars || Math.hypot(e.offsetX - down3d.x, e.offsetY - down3d.y) > 5) { down3d = null; return; }
+    down3d = null;
+    const p = mars.pick(e.offsetX, e.offsetY); if (!p) return;
+    const near = m.targets.find((t) => !t.done && Math.hypot(t.x - p.x, t.y - p.y) < 3);
+    m.issue(near ? { type: 'goto', x: near.x, y: near.y, kind: 'objective', targetId: near.id } : { type: 'goto', x: p.x, y: p.y, kind: 'goto' });
+  });
   if (window.ResizeObserver) new ResizeObserver(() => view.resize()).observe($('mapwrap')); // coach text, lab drawer, window: keep the fit exact
 
   // lab
@@ -273,6 +288,10 @@ function exportCsv() {
 // ------------------------------------------------------------------ boot
 view = new MapView($('map'));
 buildSelectors(); wire();
+import('./mars3d.js')
+  .then((mod) => mod.createMars3D({ canvas: $('gl3d'), overlay: $('ov3d') }))
+  .then((v) => { mars = v; })
+  .catch((err) => { console.warn('3-D view unavailable, using the map:', err); S.view = '2d'; });
 requestAnimationFrame(() => {
   view.resize(); newMission(); requestAnimationFrame(frame);
   const demo = new URLSearchParams(location.search).has('demo');

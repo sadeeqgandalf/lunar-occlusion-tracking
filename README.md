@@ -54,7 +54,9 @@ Brackets are Wilson 95% intervals; ± is 1.96 × standard error over seeds. All 
 
 ## Second lab: navigation filters under faults
 
-![Mission control: rover, estimators' beliefs vs truth, navigation health, scoreboard](docs/img/mission-control.png)
+![Mission control in 3-D: NASA's Perseverance model on Mars terrain, each estimator's belief as a coloured marker with its 95% uncertainty disc, navigation health and scoreboard](docs/img/mission-control-3d.png)
+
+The rover platform now renders in **3-D with NASA's official Mars 2020 Perseverance model**. Craters are real depressions at the hazard positions, beacons are navigation posts, and samples are flags. Each estimator's belief is a coloured marker with its 95% uncertainty disc on the ground. An estimator's name appears when it disagrees with the steering estimator by more than 2 m. Click the ground to send a waypoint. The 2-D map, jet and spacecraft platforms remain available.
 
 `index.html` is an ego-navigation lab. Fly a **Mars rover, a fighter jet or a spacecraft** (Clohessy-Wiltshire docking) through injected faults while dead reckoning, EKF, UKF and a particle filter estimate the vehicle's own state on the same sensor stream. It includes:
 * an onboard-only **Navigation Health** monitor;

@@ -12,7 +12,7 @@ const els = new Map();
 const el = (id) => {
   if (!els.has(id)) {
     const e = { id, style: {}, dataset: {}, classList: { toggle() {}, add() {}, remove() {} }, tBodies: [{}], children: [], firstChild: {},
-      getBoundingClientRect: () => ({ width: 800, height: 600 }), getContext: () => sink(), appendChild() {}, click() { this.onclick?.({ target: this }); },
+      getBoundingClientRect: () => ({ width: 800, height: 600 }), getContext: () => sink(), appendChild() {}, addEventListener() {}, click() { this.onclick?.({ target: this }); },
       value: '', textContent: '', innerHTML: '', checked: true, hidden: false };
     els.set(id, e);
   }
