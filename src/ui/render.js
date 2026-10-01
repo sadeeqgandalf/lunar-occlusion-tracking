@@ -44,6 +44,7 @@ export class MapView {
   panBy(dx, dy) { if (this.swap) { this.pan.y -= dx / this.s; this.pan.x += dy / this.s; } else { this.pan.x -= dx / this.s; this.pan.y += dy / this.s; } }
 
   draw(m, ui) {
+    if (this.W < 120 || this.H < 120) return; // hidden or too small to draw into
     const c = this.c, ctr = this.center(m), s = this.s, P = m.platform, st = STYLE[P.id], b = m.world.bounds;
     const S = (x, y) => this.w2s(x, y, ctr);
     c.clearRect(0, 0, this.W, this.H);

@@ -141,7 +141,22 @@ function updateCharts() {
 
 // ------------------------------------------------------------------ main loop
 let acc = 0, last = performance.now(), hudT = 0, chT = 0;
+/** Show a visible, copyable message instead of failing silently. */
+function showError(where, err) {
+  console.error(`[${where}]`, err);
+  let el = document.getElementById('err3d');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'err3d';
+    el.style.cssText = 'position:absolute;left:50%;top:60px;transform:translateX(-50%);z-index:20;max-width:80%;background:#4c1219;color:#ffd7db;border:1px solid #ff5d6c;border-radius:8px;padding:8px 12px;font:12px/1.4 ui-monospace,monospace;user-select:text';
+    (document.getElementById('mapwrap') || document.body).appendChild(el);
+  }
+  el.textContent = `3-D view stopped, switched to the 2-D map. Error: ${err?.message || err}`;
+}
 function frame(now) {
+  requestAnimationFrame(frame); // schedule first: one bad frame must never stop the loop
+  try { frameBody(now); } catch (err) { showError('frame', err); }
+}
+function frameBody(now) {
   const dt = Math.min((now - last) / 1000, 0.1); last = now;
   if (!S.paused) {
     acc += dt * S.speed;
@@ -154,10 +169,13 @@ function frame(now) {
   for (const [pid, cid] of Object.entries(VIEW3D_CANVAS)) $(cid).style.display = use3d && pid === m.platform.id ? 'block' : 'none';
   $('viewsw').style.display = v3 ? 'flex' : 'none';
   if (v3 && $('viewsw').firstElementChild.textContent !== VIEW3D_LABEL[m.platform.id]) $('viewsw').firstElementChild.textContent = VIEW3D_LABEL[m.platform.id];
-  if (use3d) v3.render(m, S.ui); else view.draw(m, S.ui);
+  if (use3d) {
+    try { v3.render(m, S.ui); }
+    catch (err) { showError('3-D view', err); delete views3d[m.platform.id]; S.view = '2d'; [...$('viewsw').children].forEach((b) => b.classList.toggle('on', b.dataset.v === '2d')); setTimeout(() => view.resize(), 0); }
+  } else view.draw(m, S.ui);
   if (now - hudT > 150) { hudT = now; updateHud(); }
   if (now - chT > 300) { chT = now; updateCharts(); }
-  requestAnimationFrame(frame);
+
 }
 
 // ------------------------------------------------------------------ input
@@ -298,7 +316,7 @@ for (const [id, file, fn] of [['rover', './mars3d.js', 'createMars3D'], ['spacec
   import(file)
     .then((mod) => mod[fn]({ canvas: $(VIEW3D_CANVAS[id]), overlay: $('ov3d') }))
     .then((v) => { views3d[id] = v; })
-    .catch((err) => console.warn(`3-D ${id} view unavailable, using the map:`, err));
+    .catch((err) => showError(`3-D ${id} load`, err));
 }
 requestAnimationFrame(() => {
   view.resize(); newMission(); requestAnimationFrame(frame);

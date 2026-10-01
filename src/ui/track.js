@@ -130,6 +130,7 @@ function tag(c, x, y, text, col, dashed) {
 
 function drawMap() {
   const { c, W, H } = fit($('map')), w = sess.world, cam = w.cam, col = COLORS[S.sel];
+  if (W < 120 || H < 120) return; // hidden or too small to draw into (would give negative scales)
   const xmin = -cam.range * Math.sin(cam.fov / 2) - 2, xmax = -xmin, ymin = cam.y - 5, ymax = cam.y + cam.range + 1, pad = 18, top = 54;
   const s = Math.min((W - 2 * pad) / (xmax - xmin), (H - top - pad) / (ymax - ymin));
   const ox = W / 2 - ((xmin + xmax) / 2) * s, oy = top + (H - top - pad) / 2 + ((ymin + ymax) / 2) * s;
@@ -205,6 +206,7 @@ function drawMap() {
 
 function drawCam() {
   const { c, W, H } = fit($('cam')), w = sess.world, cam = w.cam, col = COLORS[S.sel];
+  if (W < 60 || H < 40) return;
   const f = W / 2 / Math.tan(cam.fov / 2), fv = H * 1.7, y0 = H * 0.24, camH = 2.2;
   const U = (brg) => W / 2 - f * Math.tan(wrapAngle(brg - cam.th));
   const ground = (d) => y0 + (fv * camH) / Math.max(d, 1);
@@ -246,7 +248,23 @@ function drawCam() {
 
 // ------------------------------------------------------------------ loop & wiring
 let acc = 0, last = performance.now(), uiT = 0;
+
+/** Show a visible, copyable message instead of failing silently. */
+function showError(where, err) {
+  console.error(`[${where}]`, err);
+  let el = document.getElementById('err3d');
+  if (!el) {
+    el = document.createElement('div'); el.id = 'err3d';
+    el.style.cssText = 'position:absolute;left:50%;top:60px;transform:translateX(-50%);z-index:20;max-width:80%;background:#4c1219;color:#ffd7db;border:1px solid #ff5d6c;border-radius:8px;padding:8px 12px;font:12px/1.4 ui-monospace,monospace;user-select:text';
+    (document.getElementById('mapwrap') || document.body).appendChild(el);
+  }
+  el.textContent = `3-D view stopped, switched to the 2-D map. Error: ${err?.message || err}`;
+}
 function frame(now) {
+  requestAnimationFrame(frame); // schedule first: one bad frame must never stop the loop
+  try { frameBody(now); } catch (err) { showError('frame', err); }
+}
+function frameBody(now) {
   const dt = Math.min((now - last) / 1000, 0.1); last = now;
   if (!S.paused) { acc += dt * S.speed; let n = 0; while (acc >= sess.world.dt && n < 200) {
     sess.step(); updateFeed(); acc -= sess.world.dt; n++;
@@ -257,10 +275,15 @@ function frame(now) {
   for (const id of ['gl3d', 'ov3d', 'glcam', 'ovcam', 'hint3d']) $(id).style.display = use3d ? 'block' : 'none';
   if (use3d) {
     marks = marks.filter((m) => sess.world.t - m.t < 4);
-    w3d.render(sess, { sel: S.sel, color: COLORS[S.sel], showTruth: S.showTruth, marks: marks.filter((m) => m.run === S.sel).map((m) => ({ ...m, alpha: Math.max(1 - (sess.world.t - m.t) / 4, 0.2) })) });
+    try {
+      w3d.render(sess, { sel: S.sel, color: COLORS[S.sel], showTruth: S.showTruth, marks: marks.filter((m) => m.run === S.sel).map((m) => ({ ...m, alpha: Math.max(1 - (sess.world.t - m.t) / 4, 0.2) })) });
+    } catch (err) { // fall back to the 2-D views and say why
+      showError('3-D view', err); w3d = null; S.view = '2d';
+      [...$('viewsw').children].forEach((b) => b.classList.toggle('on', b.dataset.v === '2d'));
+      // the 2-D canvases become visible on the next frame and are drawn then
+    }
   } else { drawMap(); drawCam(); }
   if (now - uiT > 250) { uiT = now; updateCards(); }
-  requestAnimationFrame(frame);
 }
 
 function wire() {
@@ -318,5 +341,5 @@ wire(); newSession(); requestAnimationFrame(frame);
 import('./world3d.js')
   .then((m) => m.createWorld3D({ mainCanvas: $('gl3d'), mainOverlay: $('ov3d'), camCanvas: $('glcam'), camOverlay: $('ovcam') }))
   .then((w) => { w3d = w; $('load3d').remove(); })
-  .catch((err) => { console.warn('3-D view unavailable:', err); $('load3d').textContent = '3-D view unavailable here: using the top-down map.'; S.view = '2d'; });
+  .catch((err) => { showError('3-D load', err); $('load3d')?.remove(); S.view = '2d'; });
 window.__track = () => sess;

@@ -23,11 +23,14 @@ export function makeRenderer(canvas, exposure = 1.15) {
   r.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap;
   r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = exposure; r.outputColorSpace = THREE.SRGBColorSpace;
+  // a lost GPU context (driver reset, sleep/wake, too many 3-D tabs) otherwise leaves a silent blank canvas
+  canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); r.userData = { lost: true }; });
   return r;
 }
 
 /** Resize a renderer to its canvas' CSS box and update the camera aspect. Returns false if not laid out yet. */
 export function fitRenderer(r, canvas, cam) {
+  if (r.userData?.lost) throw new Error('WebGL context lost (GPU reset, sleep/wake or too many 3-D tabs open)');
   const w = canvas.clientWidth, h = canvas.clientHeight;
   if (!w || !h) return false;
   const pr = r.getPixelRatio();
