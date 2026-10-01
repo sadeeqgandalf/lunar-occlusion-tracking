@@ -20,8 +20,9 @@ const el = (id) => {
 };
 let rafQueue = [];
 globalThis.window = globalThis;
-globalThis.document = { getElementById: el, createElement: () => el('tmp'), addEventListener() {} };
+globalThis.document = { getElementById: el, createElement: () => el('tmp'), addEventListener() {}, body: el('body') };
 globalThis.devicePixelRatio = 1;
+globalThis.addEventListener = () => {}; globalThis.dispatchEvent = () => true;
 globalThis.location = { search: '' };
 globalThis.requestAnimationFrame = (f) => rafQueue.push(f);
 globalThis.localStorage = { getItem: () => null, setItem() {} };

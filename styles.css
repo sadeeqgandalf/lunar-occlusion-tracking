@@ -75,3 +75,14 @@ button.estop{background:#b4232f;border-color:#ff5d6c;color:#fff;font-weight:700;
 canvas.gl{position:absolute;inset:0;width:100%;height:100%;display:none}canvas.gl.ov{pointer-events:none}
 .viewsw{position:absolute;right:10px;top:10px;display:flex;z-index:3}.viewsw button{border-radius:0;margin-left:-1px;font-size:12px}.viewsw button:first-child{border-radius:6px 0 0 6px}.viewsw button:last-child{border-radius:0 6px 6px 0}.viewsw button.on{background:var(--cyan);color:#04202d;border-color:var(--cyan)}
 @media (max-width:1700px){.brand small{display:none}.seg button{padding:5px 7px}header{gap:6px 8px}}
+
+#play{min-width:118px;font-weight:700;font-size:14px;padding:6px 14px;letter-spacing:.03em}
+#play[data-state=running]{background:#5a4210;border-color:#ffd166;color:#ffe3a3}
+#play[data-state=paused]{background:#14532d;border-color:#4ade80;color:#d6ffe4}
+
+/* collapsible side panels (header buttons, or [ and ] keys) */
+#togL,#togR{font-size:13px;padding:5px 9px}#togL.off,#togR.off{opacity:.55}
+body.hide-left #left,body.hide-right #right{display:none}
+body.hide-left main{grid-template-columns:minmax(0,1fr) 350px}
+body.hide-right main{grid-template-columns:270px minmax(0,1fr)}
+body.hide-left.hide-right main,body.hide-right main.trk{grid-template-columns:minmax(0,1fr)}

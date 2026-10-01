@@ -78,9 +78,9 @@ export async function createSpace3D({ canvas, overlay }) {
     chaser.position.copy(tpos); chaser.lookAt(H(0, 0)); chaser.visible = ui.showTruth;
     if (ui.showTruth) labels.push({ p: tpos.clone().add(new THREE.Vector3(0, -8.5, 0)), text: `crew module (true) · ${Math.hypot(x[0], x[1]).toFixed(0)} m to Gateway, ${Math.hypot(x[2], x[3]).toFixed(2)} m/s`, color: '#fff', bg: '#ffffffd8', font: '11px system-ui' });
     labels.push({ p: H(GATEWAY_SPAN * 0.35, 0), text: 'Gateway (docking target)', color: '#7cf', bg: '#0b2a3a', fg: '#bfe9ff' });
-    // camera: start behind and above the chaser looking at Gateway; then follow the chaser
-    const tgt = tpos.clone().lerp(H(0, 0), 0.35);
-    if (!framed) { controls.target.copy(tgt); cam.position.copy(tpos).add(new THREE.Vector3(-35, 18, 45)); framed = true; }
+    // camera: follow the crew module from behind and above, looking past it toward Gateway
+    const tgt = tpos.clone().lerp(H(0, 0), 0.12);
+    if (!framed) { const back = tpos.clone().sub(H(0, 0)).normalize(); controls.target.copy(tgt); cam.position.copy(tpos).addScaledVector(back, 38).add(new THREE.Vector3(0, 16, 0)); framed = true; }
     const d = tgt.clone().sub(controls.target); controls.target.copy(tgt); cam.position.add(d);
     // debris tumbles
     staticGroup.children.forEach((o) => { if (o.userData.spin) { o.rotation.x += o.userData.spin.x * 0.02; o.rotation.y += o.userData.spin.y * 0.02; } });

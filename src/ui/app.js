@@ -11,7 +11,7 @@ import { runTour } from './tour.js';
 
 const $ = (id) => document.getElementById(id);
 const S = {
-  platform: 'rover', scenario: 'nominal', seed: 7, speed: 2, paused: false,
+  platform: 'rover', scenario: 'nominal', seed: 7, speed: 4, paused: false,
   enabled: new Set(['dr', 'ekf', 'ukf', 'pf']), primary: 'ekf', custom: [],
   ui: { showTruth: true, showCov: true, showParticles: true, colors: {} }, keys: {},
   safing: true, delay: 0, view: '3d',
@@ -25,13 +25,16 @@ let m, view;
 
 const colorsNow = () => { for (const c of listFilters()) S.ui.colors[c.id] = c.color; };
 
-function newMission() {
+const setPlay = () => { $('play').textContent = S.paused ? '▶ Play' : '⏸ Pause'; $('play').dataset.state = S.paused ? 'paused' : 'running'; };
+// every new mission starts flying its plan at once, so the vehicle is never left waiting for a command
+function newMission(autostart = true) {
   colorsNow();
   m = new Mission({ platform: S.platform, scenario: S.scenario, seed: S.seed, filters: [...S.enabled], primary: S.primary });
   m.safing = S.safing; m.uplinkDelay = S.delay;
   S.primary = m.primary;
   view.setWorld(m.world);
   buildFilters(); buildFaults(); buildHud(); $('banner').hidden = true;
+  if (autostart) { m.issue({ type: 'plan' }); S.paused = false; setPlay(); }
 }
 
 // ------------------------------------------------------------------ header / selectors
@@ -90,16 +93,16 @@ function renderCoach() {
 function tour() {
   $('brief').hidden = true; $('modal').hidden = true;
   runTour({
-    prepare() { S.platform = 'rover'; $('platform').value = 'rover'; fillScenarios(); S.scenario = 'nominal'; $('scenario').value = 'nominal'; S.primary = 'ekf'; S.enabled = new Set(['dr', 'ekf', 'ukf', 'pf']); S.ui.showTruth = true; $('optTruth').checked = true; newMission(); S.paused = true; $('play').textContent = '▶ Play'; setTimeout(() => view.resize(), 0); },
+    prepare() { S.platform = 'rover'; $('platform').value = 'rover'; fillScenarios(); S.scenario = 'nominal'; $('scenario').value = 'nominal'; S.primary = 'ekf'; S.enabled = new Set(['dr', 'ekf', 'ukf', 'pf']); S.ui.showTruth = true; $('optTruth').checked = true; newMission(false); S.paused = true; setPlay(); setTimeout(() => view.resize(), 0); },
     start() { startMission(); },
     fault(k) { m.injectFault(k); },
     stop() { m.issue({ type: 'stop' }); },
     truth(v) { S.ui.showTruth = v; $('optTruth').checked = v; },
-    dr() { m.setPrimary('dr'); S.primary = 'dr'; buildFilters(); m.issue({ type: 'plan' }); S.paused = false; $('play').textContent = '⏸ Pause'; },
+    dr() { m.setPrimary('dr'); S.primary = 'dr'; buildFilters(); m.issue({ type: 'plan' }); S.paused = false; setPlay(); },
   });
 }
 function startMission() {
-  m.issue({ type: 'plan' }); S.paused = false; $('play').textContent = '⏸ Pause';
+  m.issue({ type: 'plan' }); S.paused = false; setPlay();
   S.speed = Math.max(S.speed, 4); [...$('speed').children].forEach((b) => b.classList.toggle('on', +b.dataset.v === S.speed));
 }
 function updateHud() {
@@ -172,7 +175,7 @@ function frame(now) {
   try { frameBody(now); } catch (err) { showError('frame', err); }
 }
 function frameBody(now) {
-  const dt = Math.min((now - last) / 1000, 0.1); last = now;
+  const dt = Math.min((now - last) / 1000, 0.5); last = now; // 0.5 s cap: a slow 3-D frame must not slow the simulation clock
   if (!S.paused) {
     acc += dt * S.speed;
     let n = 0;
@@ -203,8 +206,8 @@ function wire() {
     setTimeout(() => { view.resize(); view.setWorld(m.world); }, 0);
   };
   $('scenario').onchange = (e) => { S.scenario = e.target.value; newMission(); };
-  $('reset').onclick = newMission;
-  $('play').onclick = () => { S.paused = !S.paused; $('play').textContent = S.paused ? '▶ Play' : '⏸ Pause'; };
+  $('reset').onclick = () => newMission();
+  $('play').onclick = () => { S.paused = !S.paused; setPlay(); };
   $('speed').onclick = (e) => { const v = e.target.dataset.v; if (!v) return; S.speed = +v; [...$('speed').children].forEach((b) => b.classList.toggle('on', b === e.target)); };
   $('learn').onclick = () => { $('modal').hidden = false; };
   $('modalClose').onclick = () => { $('modal').hidden = true; };
@@ -220,6 +223,16 @@ function wire() {
   $('btnStop').onclick = () => m.issue({ type: 'stop' });
   $('stopTop').onclick = () => m.issue({ type: 'stop' });
   $('tourBtn').onclick = tour;
+
+  // collapsible side panels, remembered per page
+  const KEY = 'panels:' + location.pathname;
+  const applyPanels = (st) => { for (const [side, id] of [['left', 'togL'], ['right', 'togR']]) { document.body.classList.toggle('hide-' + side, !!st[side]); $(id)?.classList.toggle('off', !!st[side]); } };
+  let panels = {}; try { panels = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch {}
+  const togglePanel = (side) => { panels[side] = !panels[side]; try { localStorage.setItem(KEY, JSON.stringify(panels)); } catch {} applyPanels(panels); dispatchEvent(new Event('resize')); };
+  applyPanels(panels);
+  if ($('togL')) $('togL').onclick = () => togglePanel('left');
+  $('togR').onclick = () => togglePanel('right');
+  addEventListener('keydown', (e) => { if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return; if (e.key === '[' && $('togL')) togglePanel('left'); if (e.key === ']') togglePanel('right'); });
   $('faults').onclick = (e) => { const f = e.target.dataset.f; if (f) m.injectFault(f); };
   $('btnCsv').onclick = exportCsv;
   const opt = (id, fn) => { $(id).onchange = (e) => fn(e.target.checked); };

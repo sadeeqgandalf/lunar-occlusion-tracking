@@ -295,7 +295,7 @@ function frame(now) {
   try { frameBody(now); } catch (err) { showError('frame', err); }
 }
 function frameBody(now) {
-  const dt = Math.min((now - last) / 1000, 0.1); last = now;
+  const dt = Math.min((now - last) / 1000, 0.5); last = now; // 0.5 s cap: a slow 3-D frame must not slow the simulation clock
   if (!S.paused) { acc += dt * S.speed; let n = 0; while (acc >= sess.world.dt && n < 200) {
     sess.step(); sess.runs.forEach((r) => labelConfirmed(r.tracker)); updateFeed(); acc -= sess.world.dt; n++;
     if (sess.world.frame % 10 === 0) sess.runs.forEach((r, i) => S.sw[i].push([sess.world.t, r.metrics.idsw])); // 1 Hz series
@@ -328,10 +328,21 @@ function wire() {
   $('scenario').onchange = (e) => { S.scenario = e.target.value; newSession(); };
   $('seed').onchange = (e) => { S.seed = Math.max(1, +e.target.value || 1); newSession(); };
   $('reset').onclick = newSession;
-  $('play').onclick = () => { S.paused = !S.paused; $('play').textContent = S.paused ? '▶ Play' : '⏸ Pause'; };
+  const setPlay = () => { $('play').textContent = S.paused ? '▶ Play' : '⏸ Pause'; $('play').dataset.state = S.paused ? 'paused' : 'running'; };
+  $('play').onclick = () => { S.paused = !S.paused; setPlay(); }; setPlay();
   $('speed').onclick = (e) => { const v = e.target.dataset.v; if (!v) return; S.speed = +v; [...$('speed').children].forEach((b) => b.classList.toggle('on', b === e.target)); };
   $('cards').onclick = (e) => { const el = e.target.closest('.tcard'); if (!el) return; S.sel = +el.dataset.i; buildCards(); updateCards(); };
   $('optTruth').onchange = (e) => { S.showTruth = e.target.checked; };
+
+  // collapsible side panels, remembered per page
+  const KEY = 'panels:' + location.pathname;
+  const applyPanels = (st) => { for (const [side, id] of [['left', 'togL'], ['right', 'togR']]) { document.body.classList.toggle('hide-' + side, !!st[side]); $(id)?.classList.toggle('off', !!st[side]); } };
+  let panels = {}; try { panels = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch {}
+  const togglePanel = (side) => { panels[side] = !panels[side]; try { localStorage.setItem(KEY, JSON.stringify(panels)); } catch {} applyPanels(panels); dispatchEvent(new Event('resize')); };
+  applyPanels(panels);
+  if ($('togL')) $('togL').onclick = () => togglePanel('left');
+  $('togR').onclick = () => togglePanel('right');
+  addEventListener('keydown', (e) => { if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return; if (e.key === '[' && $('togL')) togglePanel('left'); if (e.key === ']') togglePanel('right'); });
   $('viewsw').onclick = (e) => { const v = e.target.dataset.v; if (!v) return; S.view = v; [...$('viewsw').children].forEach((b) => b.classList.toggle('on', b === e.target)); };
   // ---- what-if panel: sliders show live values; Apply restarts the same scenario/seed with the overrides
   const W_KEYS = ['pd', 'clutter', 'targets', 'lowFrac'];
