@@ -258,7 +258,14 @@ function showError(where, err) {
     el.style.cssText = 'position:absolute;left:50%;top:60px;transform:translateX(-50%);z-index:20;max-width:80%;pointer-events:auto;background:#4c1219;color:#ffd7db;border:1px solid #ff5d6c;border-radius:8px;padding:8px 12px;font:12px/1.4 ui-monospace,monospace;user-select:text';
     (document.getElementById('mapwrap') || document.body).appendChild(el);
   }
-  const msg = err?.message || String(err), lost = /context lost/i.test(msg), low = /low-power 3D/.test(msg);
+  const msg = err?.message || String(err), low = /low-power 3D/.test(msg);
+  // a dead context shows up either as our 'context lost' error or as WebGL calls failing (e.g. no shader object)
+  const dead = /WebGLShader|WebGLProgram|isContextLost|CONTEXT_LOST/i.test(msg), lost = dead || /context lost/i.test(msg);
+  if (dead) {
+    el.innerHTML = '';
+    el.append('3-D view paused, showing the 2-D map. The browser gave this page a non-working 3-D context. This usually happens after many 3-D tabs or reloads, or a graphics hiccup. Fix: quit the browser completely (Cmd+Q), reopen it, and open only this page. Details: ' + msg);
+    return;
+  }
   el.innerHTML = '';
   el.append(`3-D view paused, showing the 2-D map. ${lost && !low ? 'Your browser ran short of graphics memory. ' : ''}Details: ${msg}`);
   if (lost && !low) {
