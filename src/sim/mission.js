@@ -97,7 +97,8 @@ export class Mission {
   _apply(c) {
     switch (c.type) {
       case 'drive': this.manual = c.cmd; this.manualActive = this.platform.isActive(c.cmd); break;
-      case 'goto': this.waypoints.push({ x: c.x, y: c.y, kind: c.kind || 'goto', targetId: c.targetId }); this.safeHold = false; break;
+      case 'goto': if (!Number.isFinite(c.x) || !Number.isFinite(c.y)) { this.log('Waypoint ignored: invalid position', 'warn'); break; }
+        this.waypoints.push({ x: c.x, y: c.y, kind: c.kind || 'goto', targetId: c.targetId }); this.safeHold = false; break;
       case 'clear': this.waypoints = []; this.dwell = null; break;
       case 'stop': this.waypoints = []; this.manual = this.platform.idleCmd(this); this.manualActive = false; this.dwell = null; break;
       case 'plan': this.waypoints = this.world.route.map((r) => ({ ...r })); this.safeHold = false; this.log(`Nominal plan uplinked (${this.waypoints.length} legs)`, 'info'); break;

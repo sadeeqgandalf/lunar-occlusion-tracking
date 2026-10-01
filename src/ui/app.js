@@ -25,6 +25,12 @@ let m, view;
 
 const colorsNow = () => { for (const c of listFilters()) S.ui.colors[c.id] = c.color; };
 
+// the auto-uplinked plan gives way to the operator: the first click replaces it, later clicks extend the new route
+let planAuto = false;
+function userGoto(cmd) {
+  if (planAuto) { m.issue({ type: 'clear' }); m.log('Your waypoint replaces the nominal plan', 'info'); planAuto = false; }
+  m.issue(cmd);
+}
 const setPlay = () => { $('play').textContent = S.paused ? '▶ Play' : '⏸ Pause'; $('play').dataset.state = S.paused ? 'paused' : 'running'; };
 // every new mission starts flying its plan at once, so the vehicle is never left waiting for a command
 function newMission(autostart = true) {
@@ -34,7 +40,7 @@ function newMission(autostart = true) {
   S.primary = m.primary;
   view.setWorld(m.world);
   buildFilters(); buildFaults(); buildHud(); $('banner').hidden = true;
-  if (autostart) { m.issue({ type: 'plan' }); S.paused = false; setPlay(); }
+  if (autostart) { m.issue({ type: 'plan' }); planAuto = true; S.paused = false; setPlay(); }
 }
 
 // ------------------------------------------------------------------ header / selectors
@@ -102,7 +108,7 @@ function tour() {
   });
 }
 function startMission() {
-  m.issue({ type: 'plan' }); S.paused = false; setPlay();
+  m.issue({ type: 'plan' }); planAuto = true; S.paused = false; setPlay();
   S.speed = Math.max(S.speed, 4); [...$('speed').children].forEach((b) => b.classList.toggle('on', +b.dataset.v === S.speed));
 }
 function updateHud() {
@@ -192,7 +198,7 @@ function frameBody(now) {
   if (use3d) {
     try { v3.render(m, S.ui); }
     catch (err) { showError('3-D view', err); if (v3.isLost?.()) views3dLost[m.platform.id] = v3; delete views3d[m.platform.id]; S.view = '2d'; [...$('viewsw').children].forEach((b) => b.classList.toggle('on', b.dataset.v === '2d')); setTimeout(() => view.resize(), 0); }
-  } else view.draw(m, S.ui);
+  } else { const cv = $('map'); if (cv.clientWidth !== view.W || cv.clientHeight !== view.H) view.resize(); view.draw(m, S.ui); } // map was measured while hidden behind 3-D: re-fit before drawing so clicks land where you point
   if (now - hudT > 150) { hudT = now; updateHud(); }
   if (now - chT > 300) { chT = now; updateCharts(); }
 
@@ -213,7 +219,7 @@ function wire() {
   $('modalClose').onclick = () => { $('modal').hidden = true; };
   $('modal').onclick = (e) => { if (e.target.id === 'modal') $('modal').hidden = true; };
   $('lessons').innerHTML = LESSONS;
-  $('btnPlan').onclick = () => m.issue({ type: 'plan' });
+  $('btnPlan').onclick = () => { m.issue({ type: 'plan' }); planAuto = true; };
   $('coach').onclick = (e) => {
     const a = e.target.dataset.act; if (!a) return;
     if (a === 'start') startMission(); else if (a === 'reset') newMission(); else if (a === 'stop') m.issue({ type: 'stop' });
@@ -301,7 +307,7 @@ function wire() {
     down3d = null;
     const p = v3.pick(e.offsetX, e.offsetY); if (!p) return;
     const near = m.targets.find((t) => !t.done && Math.hypot(t.x - p.x, t.y - p.y) < 3);
-    m.issue(near ? { type: 'goto', x: near.x, y: near.y, kind: 'objective', targetId: near.id } : { type: 'goto', x: p.x, y: p.y, kind: 'goto' });
+    userGoto(near ? { type: 'goto', x: near.x, y: near.y, kind: 'objective', targetId: near.id } : { type: 'goto', x: p.x, y: p.y, kind: 'goto' });
   });
   if (window.ResizeObserver) new ResizeObserver(() => view.resize()).observe($('mapwrap')); // coach text, lab drawer, window: keep the fit exact
 
@@ -328,7 +334,7 @@ const drive = () => m.issue({ type: 'drive', cmd: m.platform.manualCmd(S.keys) }
 function clickMap(px, py) {
   const [x, y] = view.s2w(px, py, view.center(m));
   const near = m.targets.find((t) => !t.done && Math.hypot(...view.w2s(t.x, t.y, view.center(m)).map((v, i) => v - [px, py][i])) < 16);
-  m.issue(near ? { type: 'goto', x: near.x, y: near.y, kind: 'objective', targetId: near.id } : { type: 'goto', x, y, kind: 'goto' });
+  userGoto(near ? { type: 'goto', x: near.x, y: near.y, kind: 'objective', targetId: near.id } : { type: 'goto', x, y, kind: 'goto' });
 }
 
 function exportCsv() {
