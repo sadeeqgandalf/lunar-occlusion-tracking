@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Estimation Mission Control</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <div class="brand"><span class="logo">◉</span><b>EKF</b> MISSION CONTROL<small>state-estimation lab</small></div>
+  <label><span class="lt">Platform</span> <select id="platform"></select></label>
+  <label><span class="lt">Scenario</span> <select id="scenario"></select></label>
+  <div class="spacer"></div>
+  <div class="clock" id="clock">T+000.0 s</div>
+  <button id="stopTop" class="estop" title="Halt the vehicle: clears waypoints and manual drive (Esc)">■ STOP</button>
+  <button id="play" title="Freeze or resume the simulation clock (Space)">⏸ Pause</button>
+  <div class="seg" id="speed"></div>
+  <button id="reset" title="R">↺ Reset</button>
+  <button id="tourBtn" class="accent" title="Step-by-step guided tour">▶ Tour</button>
+  <button id="learn" class="accent">? Learn</button>
+</header>
+
+<main>
+  <aside id="left">
+    <section>
+      <h3>Mission <span id="status" class="badge">RUNNING</span></h3>
+      <div id="health" class="health"></div>
+      <div class="meter"><label>Hull</label><div class="bar"><i id="hullBar"></i></div><span id="hullVal"></span></div>
+      <div class="meter"><label id="resName">Battery</label><div class="bar"><i id="resBar"></i></div><span id="resVal"></span></div>
+      <div id="objectives"></div>
+      <div class="kv"><span>Score</span><b id="score">0</b></div>
+      <div id="faultChips"></div>
+    </section>
+    <section>
+      <h3>Operator</h3>
+      <div class="btnrow">
+        <button id="btnPlan" title="P">Upload plan</button>
+        <button id="btnUndo" title="Backspace">Undo leg</button>
+        <button id="btnStop" title="Esc" class="danger">Stop</button>
+      </div>
+      <p class="hint">Click map = add waypoint (click an objective to target it). Drag = pan, wheel = zoom. <kbd>WASD</kbd>/arrows = manual drive.</p>
+      <label class="chk"><input type="checkbox" id="optSafing" checked> Uncertainty-aware safing <i title="Autopilot holds when the 3σ pose bubble overlaps a hazard ahead.">ⓘ</i></label>
+      <label class="chk"><input type="checkbox" id="optTruth" checked> Show ground truth <i title="Untick for blind ops: you only see what the filters believe.">ⓘ</i></label>
+      <label class="chk"><input type="checkbox" id="optCov" checked> Covariance ellipses (95%)</label>
+      <label class="chk"><input type="checkbox" id="optParticles" checked> Particles</label>
+      <label class="chk"><input type="checkbox" id="optFollow"> Follow vehicle</label>
+      <label class="slider">Uplink latency <b id="delayVal">0 s</b><input type="range" id="delay" min="0" max="8" step="0.5" value="0"></label>
+    </section>
+    <section>
+      <h3>Fault injection</h3>
+      <div id="faults" class="btnrow wrap"></div>
+    </section>
+    <section class="log"><h3>Event log</h3><div id="events"></div></section>
+  </aside>
+
+  <div id="center">
+    <div id="mapwrap">
+      <canvas id="map"></canvas>
+      <div id="banner" hidden></div>
+      <div id="legend"></div>
+    </div>
+    <div id="coach" class="coach"></div>
+  </div>
+
+  <aside id="right">
+    <section>
+      <h3>Estimators <small>all fed the same sensor stream</small></h3>
+      <div id="filters"></div>
+      <div id="tuning"></div>
+    </section>
+    <section>
+      <h3>Scoreboard</h3>
+      <table id="score-table"><thead><tr><th>Filter</th><th>Err</th><th>3σ</th><th>RMSE</th><th title="Average NEES. Ideal ≈ degrees of freedom">ANEES</th><th title="Gate rejects">Rej</th><th title="CPU µs per step">µs</th></tr></thead><tbody></tbody></table>
+      <p class="hint" id="neesHint"></p>
+    </section>
+    <section>
+      <h3>Telemetry</h3>
+      <canvas id="chErr" class="chart"></canvas>
+      <canvas id="chSig" class="chart"></canvas>
+      <canvas id="chNees" class="chart"></canvas>
+      <div class="btnrow"><button id="btnCsv">⬇ Export CSV</button></div>
+    </section>
+  </aside>
+</main>
+
+<section id="lab" class="collapsed">
+  <div class="labhead" id="labToggle"><b>⌘ Filter Lab</b><span>write your own estimator in JavaScript and race it against the others, live</span><i>▲</i></div>
+  <div class="labbody">
+    <textarea id="labCode" spellcheck="false"></textarea>
+    <div class="labside">
+      <button id="labRun" class="accent">Compile &amp; add to mission</button>
+      <button id="labReset">Reset template</button>
+      <pre id="labMsg"></pre>
+      <p class="hint"><code>ctx</code> gives you <code>Mat</code>, <code>model</code> (f, W, meas), <code>jacobians()</code>, <code>numJac</code>, <code>resid</code>, <code>wrapAngle</code>, <code>sensors</code>, <code>rng</code>. Return <code>{name, init, predict, update, getState, getCov}</code>.</p>
+    </div>
+  </div>
+</section>
+
+<div id="brief" class="modal" hidden><div class="card wide"><div id="briefBody"></div></div></div>
+<div id="modal" hidden><div class="card"><button id="modalClose">✕</button><div id="lessons"></div></div></div>
+<script type="module" src="src/ui/app.js"></script>
+</body>
+</html>

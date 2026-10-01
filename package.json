@@ -1,0 +1,12 @@
+{
+  "name": "rover-estimation-mission-control",
+  "version": "1.0.0",
+  "description": "Interactive rover state-estimation lab: EKF / UKF / particle filter mission control with fault injection, benchmarks and a live filter editor.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test "test/*.test.js"",
+    "bench": "node bench/run.js"
+  },
+  "license": "MIT"
+}
