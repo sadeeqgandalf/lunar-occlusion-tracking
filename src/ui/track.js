@@ -6,21 +6,16 @@ import { wrapAngle, TAU } from '../core/linalg.js';
 import { isHidden, hiddenCause } from '../mot/occlusion.js';
 import { runTour } from './tour.js';
 import { lineChart } from './charts.js';
-import { idColor, idColorA, stripeOf } from './idcolor.js';
+import { idColor, idColorA, stripeOf, label, labelConfirmed, personName } from './idcolor.js';
 
 const $ = (id) => document.getElementById(id);
 const S = { scenario: 'boulders', seed: 7, speed: 2, paused: false, sel: 0, showTruth: true, view: '3d', overrides: {}, sw: [] };
 let w3d = null, w3dLost = null; // w3dLost: a 3-D view waiting for the browser to restore its GPU context
 const COLORS = ['#4ade80', '#4cc9f0', '#ff6b6b'];
 const PLAIN = {
-  'Aware + neg. info': 'Knows the blind spots AND reasons "I can\'t see them, so they must be behind that rock".',
-  'Occlusion-aware': 'Knows where the camera is blind, so it waits for people who walk behind rocks.',
-  Naive: 'Thinks it can always see everyone. If someone vanishes for a moment, it forgets them.',
-};
-const BLURB = {
-  'Aware + neg. info': 'Uses the missed detection as information about where the person is (inside the shadow).',
-  'Occlusion-aware': 'Expected detection probability = P_D × visibility, so a miss behind a rock is not evidence they left.',
-  Naive: 'Every miss counts as evidence the person is gone. After a few frames the track is deleted.',
+  'Aware + neg. info': 'Waits, and searches only the blind spot.',
+  'Occlusion-aware': 'Knows the blind spots, so it waits.',
+  Naive: 'Forgets anyone it cannot see.',
 };
 let sess, feed = [], pending = new Map(), seenEv = [], prevHidden = new Map(), marks = [], prevMatch = new Map(), prevSel = -1, idHist = new Map();
 
@@ -28,26 +23,29 @@ function newSession() {
   sess = new MotSession({ scenario: S.scenario, seed: S.seed, overrides: S.overrides });
   S.sw = sess.runs.map(() => []);
   feed = []; pending = new Map(); seenEv = sess.runs.map(() => 0); prevHidden = new Map(); marks = []; prevMatch = new Map(); idHist = new Map();
-  pushFeed(`${MOT_SCENARIOS[S.scenario].label}: ${MOT_SCENARIOS[S.scenario].blurb}`, '');
+  pushFeed(MOT_SCENARIOS[S.scenario].label, '');
   buildCards();
 }
 
 // ------------------------------------------------------------------ feed
 function pushFeed(text, cls) { feed.unshift({ t: sess.world.t, text, cls }); if (feed.length > 60) feed.pop(); }
-const chip = (txt, color) => `<span style="background:${color};color:#06101a;border-radius:8px;padding:0 6px;font-weight:700">${txt}</span>`;
+const chip = (txt, color) => `<span class="chip" style="background:${color}">${txt}</span>`;
+const idChip = (n) => chip('#' + n, idColor(n));
+const pChip = (gid) => chip(personName(gid), stripeOf(gid).hex);
 function updateFeed() {
   const W = sess.world;
-  // ID switches for the tracker on display: the same real person (stripe colour) now carries a different track ID
+  // ID switches for the tracker on display: the same real person now carries a different tracker ID
+  const T = sess.runs[S.sel].tracker;
   if (prevSel !== S.sel) { prevMatch = new Map(sess.runs[S.sel].metrics.lastMatch); prevSel = S.sel; idHist = new Map(); }
   for (const [gid, kid] of sess.runs[S.sel].metrics.lastMatch) {
-    const before = prevMatch.get(gid);
-    if (before !== undefined && before !== kid) { const st = stripeOf(gid); pushFeed(`${chip(st.name + ' stripe', st.hex)} person ${gid}: ID ${chip('#' + before, idColor(before))} → ${chip('#' + kid, idColor(kid))} · ID switch`, 'bad'); }
+    const before = prevMatch.get(gid), n = label(T, kid);
+    if (before !== undefined && before !== kid) pushFeed(`${pChip(gid)} ${idChip(label(T, before))} → ${idChip(n)} ID switch`, 'bad');
     prevMatch.set(gid, kid);
-    const h = idHist.get(gid) || []; if (h[h.length - 1] !== kid) { h.push(kid); idHist.set(gid, h); }
+    const h = idHist.get(gid) || []; if (h[h.length - 1] !== n) { h.push(n); idHist.set(gid, h); }
   }
   for (const g of W.targets) {
     const hid = isHidden(g.vis), was = prevHidden.get(g.id);
-    if (hid && was === false) pushFeed(hiddenCause(g.vis) === 'shadow' ? `Crew ${g.id} walked into deep shadow (in line of sight, but too dark to detect)` : `Crew ${g.id} went behind a boulder`, 'hide');
+    if (hid && was === false) pushFeed(`${pChip(g.id)} ${hiddenCause(g.vis) === 'shadow' ? 'in shadow' : 'behind rock'}`, 'hide');
     prevHidden.set(g.id, hid);
   }
   sess.runs.forEach((r, i) => {
@@ -62,9 +60,9 @@ function updateFeed() {
   });
   for (const [key, p] of pending) {
     if (Object.keys(p.res).length < sess.runs.length && W.t - p.t < 2.5) continue;
-    const parts = sess.runs.map((r) => { const k = p.res[r.tracker.name]; return `${short(r.tracker.name)} ${k === undefined ? '…' : k ? '✔ same ID' : '✘ new ID'}`; });
+    const parts = sess.runs.map((r) => { const k = p.res[r.tracker.name]; return `${short(r.tracker.name)} ${k === undefined ? '…' : k ? '✔' : '✘'}`; });
     const anyKept = Object.values(p.res).some(Boolean);
-    pushFeed(`Crew ${key} back after ${p.dur.toFixed(1)} s · ${parts.join(' · ')}`, anyKept ? 'ok' : 'bad');
+    pushFeed(`${pChip(key)} back · ${parts.join(' ')}`, anyKept ? 'ok' : 'bad');
     pending.delete(key);
   }
 }
@@ -73,41 +71,31 @@ const short = (n) => ({ 'Aware + neg. info': 'Aware+NI', 'Occlusion-aware': 'Awa
 // ------------------------------------------------------------------ scoreboard
 function buildCards() {
   $('cards').innerHTML = sess.runs.map((r, i) => `<div class="tcard ${i === S.sel ? 'sel' : ''}" data-i="${i}">
-    <div class="hd"><span class="nm" style="color:${COLORS[i]}"><span style="display:inline-block;width:11px;height:11px;border-radius:50%;background:${COLORS[i]};margin-right:7px"></span>${r.tracker.name}</span><span class="sub">${i === S.sel ? '◉ shown on map' : 'click to show'}</span></div>
+    <div class="nm" style="color:${COLORS[i]}">${i === S.sel ? '◉ ' : ''}${r.tracker.name}</div>
     <div class="plain">${PLAIN[r.tracker.name] || ''}</div>
-    <p>${BLURB[r.tracker.name] || ''}</p>
-    <div class="big" id="kept${i}">–</div><div class="sub" id="keptn${i}">ID kept through 1–5 s occlusions</div>
-    <div class="bar"><i id="bar${i}" style="width:0;background:${COLORS[i]}"></i></div>
-    <div class="kv"><span>ID switches<b id="idsw${i}">–</b></span><span>IDF1<b id="idf1${i}">–</b></span><span>MOTA<b id="mota${i}">–</b></span><span>GOSPA<b id="gospa${i}">–</b></span></div>
+    <div class="nums"><div><b id="kept${i}" style="color:${COLORS[i]}">–</b><span>came back with same ID</span></div><div><b id="idsw${i}">–</b><span>ID switches</span></div></div>
   </div>`).join('');
 }
 function updateCards() {
   sess.runs.forEach((r, i) => {
     const s = r.metrics.summary(), b = s.occByDuration.slice(0, 2), k = b.reduce((a, x) => a + x.kept, 0), n = b.reduce((a, x) => a + x.n, 0);
-    $('kept' + i).textContent = n ? Math.round((100 * k) / n) + '%' : '–';
-    $('keptn' + i).textContent = `ID kept through 1–5 s occlusions (${k}/${n})`;
-    $('bar' + i).style.width = (n ? (100 * k) / n : 0) + '%';
+    $('kept' + i).textContent = `${k} / ${n}`; // counts, not %: a few events in one run make percentages misleading
     $('idsw' + i).textContent = s.idsw;
-    $('idf1' + i).textContent = Number.isFinite(s.idf1) ? s.idf1.toFixed(2) : '–';
-    $('mota' + i).textContent = Number.isFinite(s.mota) ? s.mota.toFixed(2) : '–';
-    $('gospa' + i).textContent = s.gospa.toFixed(2);
   });
-  // who's who: one row per real person, with their ID history under the tracker on display
-  const live = new Set(sess.runs[S.sel].tracker.reported().map((k) => k.id)), lm = sess.runs[S.sel].metrics.lastMatch;
-  $('who').innerHTML = sess.world.targets.map((g) => {
-    const st = stripeOf(g.id), kid = lm.get(g.id), hid = isHidden(g.vis), now = kid !== undefined && live.has(kid) && !hid ? chip('#' + kid, idColor(kid)) : `<i style="color:#9aa3b2">${hid ? 'hidden' : 'no ID'}</i>`;
-    const hist = (idHist.get(g.id) || []).map((k) => chip('#' + k, idColor(k))).join(' → ') || '–';
-    const n = (idHist.get(g.id) || []).length;
-    return `<div style="display:grid;grid-template-columns:14px 64px 70px 1fr;gap:6px;align-items:center;font-size:12px;margin:3px 0"><span style="width:12px;height:12px;border-radius:3px;background:${st.hex}"></span><span>person ${g.id}</span><span>${now}</span><span style="color:${n > 1 ? '#ff9aa4' : '#9fb0c9'}">${hist}</span></div>`;
+  // people: each real person, the ID the shown tracker gives them now, and every ID they have had
+  const T = sess.runs[S.sel].tracker, live = new Set(T.reported().map((k) => k.id)), lm = sess.runs[S.sel].metrics.lastMatch;
+  $('who').innerHTML = '<span class="sub">Person</span><span class="sub">Now</span><span class="sub">IDs so far</span>' + sess.world.targets.map((g) => {
+    const kid = lm.get(g.id), hid = isHidden(g.vis);
+    const now = hid ? '<i style="color:var(--amber)">hidden</i>' : kid !== undefined && live.has(kid) ? idChip(label(T, kid)) : '<i style="color:var(--dim)">–</i>';
+    const h = idHist.get(g.id) || [], shown = h.length > 4 ? ['…', ...h.slice(-3).map(idChip)] : h.map(idChip);
+    const sw = h.length > 1 ? ` <b style="color:#ff9aa4">${h.length - 1}✘</b>` : '';
+    return `<span class="p"><i style="background:${stripeOf(g.id).hex}"></i>${personName(g.id)}</span><span>${now}</span><span>${shown.join(' ') || '–'}${sw}</span>`;
   }).join('');
   $('feed').innerHTML = feed.map((f) => `<div class="${f.cls}"><b>${f.t.toFixed(0).padStart(4)}s</b> ${f.text}</div>`).join('');
   $('clock').textContent = `T+${sess.world.t.toFixed(1).padStart(5, '0')} s`;
-  lineChart($('chSw'), { title: 'cumulative ID switches (green / blue / red trackers)', tMin: 0, tMax: Math.max(10, sess.world.t), series: S.sw.map((pts, i) => ({ color: COLORS[i], width: i === S.sel ? 2.2 : 1.4, pts })) });
+  lineChart($('chSw'), { title: '', tMin: 0, tMax: Math.max(10, sess.world.t), series: S.sw.map((pts, i) => ({ color: COLORS[i], width: i === S.sel ? 2.2 : 1.4, pts })) });
   const hiddenNow = sess.world.targets.filter((t) => isHidden(t.vis)).length, col = COLORS[S.sel];
-  $('now').innerHTML = `Watching: <span class="sw" style="background:${col}"></span><b style="color:${col}">${sess.runs[S.sel].tracker.name}</b><br>${hiddenNow} of ${sess.world.targets.length} people hidden right now (behind rocks${sess.world.cfg.shadows ? ' or in shadow' : ''})`;
-  document.documentElement.style.setProperty('--trk', col);
-  document.querySelectorAll('#key .kname').forEach((el) => { el.style.color = col; });
-  $('camTrk').style.color = col;
+  $('now').innerHTML = `<span class="sw" style="background:${col}"></span><b style="color:${col}">${T.name}</b> · ${hiddenNow}/${sess.world.targets.length} hidden`;
 }
 
 // ------------------------------------------------------------------ canvases
@@ -171,21 +159,21 @@ function drawMap() {
     c.fillStyle = b.h !== undefined && b.h < 2.2 ? 'rgba(5,6,10,0.32)' : 'rgba(5,6,10,0.72)'; c.fill(); // low rocks only hide legs
     if (!biggest || half > biggest.half) biggest = { half, cb, d };
   }
-  if (biggest) { const rr = Math.min(cam.range - 4, biggest.d + 9), [lx, ly] = P(cam.x + rr * Math.cos(biggest.cb), cam.y + rr * Math.sin(biggest.cb)); c.fillStyle = '#9aa3b2'; c.font = 'italic 11px system-ui'; c.textAlign = 'center'; c.fillText('blind zone', lx, ly); c.fillText('(camera can\'t see here)', lx, ly + 13); c.textAlign = 'left'; }
+  if (biggest) { const rr = Math.min(cam.range - 4, biggest.d + 9), [lx, ly] = P(cam.x + rr * Math.cos(biggest.cb), cam.y + rr * Math.sin(biggest.cb)); c.fillStyle = '#9aa3b2'; c.font = 'italic 11px system-ui'; c.textAlign = 'center'; c.fillText('blind zone', lx, ly); c.textAlign = 'left'; }
   c.restore();
   // boulders
   w.boulders.forEach((b, i) => { const [px, py] = P(b.x, b.y); drawRock(c, px, py, b.r * s, rockShape(b, i)); });
   // rover with camera mast
   c.save(); c.translate(cx, cy + 10); c.fillStyle = '#c8ccd2'; c.fillRect(-14, -7, 28, 14); c.fillStyle = '#2b2d33'; for (const wx of [-12, 0, 12]) for (const wy of [-9, 9]) { c.beginPath(); c.arc(wx, wy, 3, 0, TAU); c.fill(); } c.restore();
   c.fillStyle = '#4cc9f0'; c.beginPath(); c.arc(cx, cy, 4, 0, TAU); c.fill();
-  c.fillStyle = '#e6edf7'; c.font = '12px system-ui'; c.fillText('Rover camera (you)', cx + 20, cy + 14);
+  c.fillStyle = '#e6edf7'; c.font = '12px system-ui'; c.fillText('Rover camera', cx + 20, cy + 14);
   // true people
   const r = Math.max(7, 0.5 * s);
   if (S.showTruth) for (const t of w.targets) {
     const [px, py] = P(t.x, t.y), hid = !t.vis.inFov || isHidden(t.vis);
     if (t.trail.length > 1) { c.strokeStyle = '#ffffff26'; c.lineWidth = 1.5; c.setLineDash([2, 4]); c.beginPath(); t.trail.forEach(([x, y], i) => { const q = P(x, y); i ? c.lineTo(...q) : c.moveTo(...q); }); c.stroke(); c.setLineDash([]); }
     drawAstronaut(c, px, py, r, t.h, hid ? 0.45 : 1, stripeOf(t.id).hex);
-    c.fillStyle = hid ? '#ffffff99' : '#ffffffdd'; c.font = '11px system-ui'; c.fillText(hid ? `person ${t.id} · ${hiddenCause(t.vis) === 'shadow' ? 'in shadow' : 'behind rock'}` : `person ${t.id}`, px - r, py + r + 13);
+    c.fillStyle = hid ? '#ffffff99' : '#ffffffdd'; c.font = '11px system-ui'; c.fillText(personName(t.id), px - r, py + r + 13);
   }
   // camera pings this frame (orange); in training view, false alarms are tagged
   sess.last.dets.forEach((d, i) => {
@@ -198,17 +186,17 @@ function drawMap() {
   const T = sess.runs[S.sel].tracker;
   for (const t of T.tracks) {
     if (!t.confirmed) continue;
-    const [px, py] = P(t.x[0], t.x[1]), lost = t.lastSeen > 3, tc = idColor(t.id);
+    const [px, py] = P(t.x[0], t.x[1]), lost = t.lastSeen > 3, n = label(T, t.id), tc = idColor(n);
     if (lost) {
       const a = t.P.get(0, 0), b = t.P.get(0, 1), d2 = t.P.get(1, 1), m = (a + d2) / 2, q = Math.sqrt(((a - d2) / 2) ** 2 + b * b), k = Math.sqrt(5.991);
       c.save(); c.translate(px, py); c.rotate(-0.5 * Math.atan2(2 * b, a - d2));
       c.beginPath(); c.ellipse(0, 0, Math.max(r + 4, k * Math.sqrt(m + q) * s), Math.max(r + 4, k * Math.sqrt(Math.max(m - q, 0)) * s), 0, 0, TAU);
-      c.fillStyle = idColorA(t.id, 0.18); c.fill(); c.setLineDash([6, 4]); c.strokeStyle = tc; c.lineWidth = 2; c.stroke(); c.setLineDash([]); c.restore();
+      c.fillStyle = idColorA(n, 0.18); c.fill(); c.setLineDash([6, 4]); c.strokeStyle = tc; c.lineWidth = 2; c.stroke(); c.setLineDash([]); c.restore();
       c.fillStyle = tc; c.font = 'bold 14px system-ui'; c.textAlign = 'center'; c.fillText('?', px, py + 5); c.textAlign = 'left';
-      tag(c, px + r + 4, py - r, `#${t.id} lost sight · searching`, tc, true);
+      tag(c, px + r + 4, py - r, `#${n}?`, tc, true);
     } else {
       c.strokeStyle = tc; c.lineWidth = 3; c.beginPath(); c.arc(px, py, r + 5, 0, TAU); c.stroke();
-      tag(c, px + r + 6, py - r - 2, `#${t.id}`, tc, false);
+      tag(c, px + r + 6, py - r - 2, `#${n}`, tc, false);
     }
   }
   // reappearance verdicts (fade after 4 s)
@@ -216,7 +204,7 @@ function drawMap() {
   for (const m of marks) {
     if (m.run !== S.sel) continue;
     const [px, py] = P(m.x, m.y), al = Math.max(1 - (w.t - m.t) / 4, 0.2);
-    c.globalAlpha = al; c.font = 'bold 13px system-ui'; const txt = m.kept ? '✔ same ID kept' : '✘ lost them: new ID', tw = c.measureText(txt).width + 14;
+    c.globalAlpha = al; c.font = 'bold 13px system-ui'; const txt = m.kept ? '✔ same ID' : '✘ new ID', tw = c.measureText(txt).width + 14;
     c.fillStyle = m.kept ? '#14532d' : '#4c1219'; c.beginPath(); c.roundRect(px - tw / 2, py - r - 36, tw, 22, 11); c.fill();
     c.fillStyle = m.kept ? '#4ade80' : '#ff8a8a'; c.textAlign = 'center'; c.fillText(txt, px, py - r - 20); c.textAlign = 'left'; c.globalAlpha = 1;
   }
@@ -261,9 +249,9 @@ function drawCam() {
     const dx = t.x[0] - cam.x, dy = t.x[1] - cam.y, d = Math.hypot(dx, dy), brg = Math.atan2(dy, dx);
     if (Math.abs(wrapAngle(brg - cam.th)) > cam.fov / 2 || d < 1) continue;
     const u = U(brg), yb = ground(d), h = (fv * 1.8) / d, wpx = Math.max(12, (f * 1.3) / d), lost = t.lastSeen > 3;
-    const tc = idColor(t.id);
+    const n = label(T, t.id), tc = idColor(n);
     c.strokeStyle = tc; c.lineWidth = 2.5; c.setLineDash(lost ? [5, 4] : []); c.strokeRect(u - wpx / 2, yb - h * 1.1 - 2, wpx, h * 1.2 + 4); c.setLineDash([]);
-    tag(c, u - wpx / 2, yb - h * 1.1 - 6, lost ? `#${t.id} behind rock?` : `#${t.id}`, tc, lost);
+    tag(c, u - wpx / 2, yb - h * 1.1 - 6, lost ? `#${n}?` : `#${n}`, tc, lost);
   }
 }
 
@@ -302,7 +290,7 @@ function frame(now) {
 function frameBody(now) {
   const dt = Math.min((now - last) / 1000, 0.1); last = now;
   if (!S.paused) { acc += dt * S.speed; let n = 0; while (acc >= sess.world.dt && n < 200) {
-    sess.step(); updateFeed(); acc -= sess.world.dt; n++;
+    sess.step(); sess.runs.forEach((r) => labelConfirmed(r.tracker)); updateFeed(); acc -= sess.world.dt; n++;
     if (sess.world.frame % 10 === 0) sess.runs.forEach((r, i) => S.sw[i].push([sess.world.t, r.metrics.idsw])); // 1 Hz series
   } if (n === 200) acc = 0; }
   const use3d = S.view === '3d' && w3d;
@@ -349,7 +337,7 @@ function wire() {
   $('w-apply').onclick = () => {
     S.overrides = Object.fromEntries(W_KEYS.map((k) => [k, +$('w-' + k).value]));
     S.overrides.shadows = $('w-shadows').checked;
-    newSession(); pushFeed(`What-if applied: detection ${S.overrides.pd}, false alarms ${S.overrides.clutter}/frame, ${S.overrides.targets} people, ${Math.round(S.overrides.lowFrac * 100)}% low rocks, shadows ${S.overrides.shadows ? 'on' : 'off'}`, '');
+    newSession(); pushFeed('What-if applied', '');
   };
   $('w-reset').onclick = () => { S.overrides = {}; syncWhatIf(); newSession(); };
   const oldScenario = $('scenario').onchange;
@@ -364,16 +352,14 @@ function wire() {
 }
 
 const TRACK_TOUR = (api) => [
-  { at: '#goal', title: '1 · The question', text: 'When an astronaut walks behind a boulder, does the tracker give them back the <b>same ID</b> when they reappear? A new ID means the system thinks there are now two people: an <b>ID switch</b>.' },
-  { at: '#mapwrap', title: '2 · The world (real NASA models)', text: 'The white <b>astronauts</b> are where people really are; only training views show this. The coloured <b>rings and #tags</b> are what the selected tracker believes. A shaded <b>search area</b> means "lost sight, probably in here". Drag to orbit.' },
-  { at: '#camwrap', title: '3 · What the robot actually sees', text: 'Rendered from the 2.2 m camera mast with real depth. Tall rocks hide people completely; low rocks only hide legs. A <b>dashed box</b> is the tracker saying "I think someone is behind this rock".' },
-  { at: '#cards', title: '4 · Three trackers, one difference', text: 'All three get identical detections. They differ only in how they treat a missed detection. The big number is <b>% of IDs kept</b> through 1–5 s occlusions. The naive tracker deletes anyone it cannot see.', action: { label: 'Show the naive tracker on the map', run: () => api.showNaive() } },
-  { at: '#feed', title: '5 · The story, live', text: 'Every disappearance and reappearance is narrated, with a ✔ (same ID) or ✘ (new ID) verdict for each tracker.' },
-  { at: '#chSw', title: '6 · Watch the gap open', text: 'Cumulative ID switches per tracker. Over a few minutes the red (naive) line usually climbs fastest, but single runs are noisy: the README reports 20-run averages with confidence intervals.' },
-  { at: '#scenario', title: '7 · A second kind of occlusion', text: 'At the lunar south pole the sun hugs the horizon, so boulders cast very long shadows. People in shadow are in line of sight but too dark to detect.', action: { label: '🌑 Switch to South pole · Long shadows', run: () => api.polar() } },
-  { at: '#whatif', title: '8 · Your experiments', text: 'Change the world: detection rate, false alarms, crowd size, low rocks, shadows. Press Apply and see which tracker suffers. Every exercise in the guide uses these controls.' },
-  { at: '#viewsw', title: '9 · The map view', text: 'Top-down map: dark wedges show exactly where the camera is blind. Useful to understand <i>why</i> someone disappeared.' },
-  { at: null, title: 'Go deeper', text: 'The <b>📘 Guide</b> button explains each idea in plain words, then the maths, then the exact code, then the paper behind it (all references verified). Every number in the README can be regenerated with one command.' },
+  { at: '#goal', title: '1 · The question', text: 'People are <b>P1–P5</b> (suit stripe colour). The tracker names them <b>#11, #12…</b> When P3 walks behind a rock, does P3 come back with the same number? A new number is an <b>ID switch</b>.' },
+  { at: '#mapwrap', title: '2 · The world', text: 'Real NASA models. Coloured <b>rings and #tags</b> are what the tracker believes. A dashed <b>#11?</b> with a shaded area means "hidden, probably in here". Drag to orbit.' },
+  { at: '#camwrap', title: '3 · What the rover camera sees', text: 'The mask colour on each person is the tracker\'s ID. Same stripe, new mask colour = ID switch.' },
+  { at: '#cards', title: '4 · Three trackers', text: 'Same camera data, different handling of a missed detection. <b>Came back with same ID</b>: e.g. 3 / 4 means 3 of 4 short hides (1–5 s) kept their number; higher is better. <b>ID switches</b>: lower is better.', action: { label: 'Show the naive tracker', run: () => api.showNaive() } },
+  { at: '#who', title: '5 · People', text: 'One row per real person. <b>IDs so far</b> lists every number the tracker gave them. One number = never lost. Each extra number is one ID switch (✘).' },
+  { at: '#feed', title: '6 · What happened', text: '"P3 behind rock", then "P3 back" with ✔ (same ID) or ✘ (new ID) for each tracker.' },
+  { at: '#scenario', title: '7 · Shadows', text: 'At the lunar south pole the sun is low and shadows are long. People in shadow are in view but too dark to detect.', action: { label: '🌑 Switch to South pole', run: () => api.polar() } },
+  { at: null, title: 'Go deeper', text: '<b>What if…?</b> (sidebar) changes the world. <b>📘 Guide</b> explains each idea: plain words, maths, code, paper.' },
 ];
 
 wire(); newSession(); requestAnimationFrame(frame);

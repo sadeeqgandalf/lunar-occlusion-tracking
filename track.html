@@ -7,116 +7,90 @@
 <link rel="stylesheet" href="styles.css">
 <script type="importmap">{ "imports": { "three": "./vendor/three/build/three.module.min.js" } }</script>
 <style>
-  main.trk{display:grid;grid-template-columns:minmax(0,1fr) 380px;min-height:0;flex:1}
-  #stage{display:flex;flex-direction:column;min-width:0;min-height:0;background:#07090f}
-  #mapwrap{position:relative;flex:1;min-height:0}
+  main.trk{display:grid;grid-template-columns:minmax(0,1fr) 360px;min-height:0;flex:1}
+  #stage{position:relative;display:flex;flex-direction:column;min-width:0;min-height:0;background:#07090f}
+  #mapwrap{position:relative;flex:1;min-height:0;z-index:1}
+  #camwrap{position:relative;height:30%;min-height:150px;border-top:1px solid var(--line);z-index:1}
   #map,#cam,#ov3d,#ovcam{position:absolute;inset:0;width:100%;height:100%;display:block}
-  #stage{position:relative}#glAll{position:absolute;left:0;width:100%;z-index:0;display:none}#mapwrap,#camwrap{z-index:1}
   #ov3d,#ovcam{pointer-events:none}
+  #glAll{position:absolute;left:0;width:100%;z-index:0;display:none}
   #viewsw{position:absolute;left:10px;top:10px;display:flex;z-index:3}#viewsw button{border-radius:0;margin-left:-1px}#viewsw button:first-child{border-radius:6px 0 0 6px}#viewsw button:last-child{border-radius:0 6px 6px 0}#viewsw button.on{background:var(--cyan);color:#04202d;border-color:var(--cyan)}
   #load3d{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:var(--dim);font:13px var(--mono)}
   .hint3d{position:absolute;left:10px;bottom:10px;font-size:11.5px;color:#9aa3b2;background:#0a0e16cc;padding:4px 8px;border-radius:6px;pointer-events:none}
-  #camwrap{position:relative;height:30%;min-height:150px;border-top:1px solid var(--line)}
-  .cap{position:absolute;left:10px;top:8px;font:600 11px var(--mono);letter-spacing:.1em;color:var(--dim);background:#0a0e16cc;padding:3px 8px;border-radius:6px;pointer-events:none}
-  #goal{padding:9px 14px;border-bottom:1px solid var(--line);background:#0c1322;font-size:13.5px}
-  #goal b{color:var(--amber)}
-  .tcard{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0;background:var(--panel2);cursor:pointer}
+  .over{position:absolute;background:#0a0e16e6;border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:12.5px;pointer-events:none}
+  #now{right:10px;top:10px}#now .sw{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+  .camcap{left:10px;top:8px}
+  #goal{display:flex;flex-wrap:wrap;gap:6px 22px;align-items:center;padding:8px 14px;border-bottom:1px solid var(--line);background:#0c1322;font-size:13px}
+  #goal>b{color:var(--amber);margin-right:6px}#goal span{display:flex;align-items:center;gap:6px}
+  .tcard{border:1px solid var(--line);border-radius:10px;padding:9px 12px;margin:7px 0;background:var(--panel2);cursor:pointer}
   .tcard.sel{border-color:var(--cyan);box-shadow:0 0 0 1px var(--cyan) inset}
-  .tcard .hd{display:flex;justify-content:space-between;align-items:baseline}.tcard .nm{font-weight:700}
-  .tcard .big{font:700 28px var(--mono)}.tcard .sub{color:var(--dim);font-size:11.5px}
-  .tcard .bar{height:6px;border-radius:3px;background:#1d2840;margin:6px 0}.tcard .bar i{display:block;height:100%;border-radius:3px}
-  .tcard .kv{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:6px;font-size:11px;color:var(--dim)}.tcard .kv b{display:block;color:var(--text);font:600 13px var(--mono)}
-  .tcard p{margin:6px 0 0;font-size:12px;color:#b7c4da}
-  #feed{font:12px/1.5 var(--mono);max-height:260px;overflow:auto}#feed div{padding:3px 0;border-bottom:1px solid #182238}
-  #feed .ok{color:var(--good)}#feed .bad{color:var(--bad)}#feed .hide{color:var(--amber)}
-  #strip{display:flex;flex-wrap:wrap;gap:6px 18px;padding:7px 12px;border-bottom:1px solid var(--line);background:#0c1322;font-size:12.5px;align-items:center}#strip span{display:flex;align-items:center;gap:6px}#strip b{font-weight:700}
-  #analogy{padding:6px 12px;font-size:12.5px;color:#b7c4da;background:#0a1020;border-bottom:1px solid var(--line)}
-  #oldkey{position:absolute;left:10px;top:10px;background:#0a0e16e6;border:1px solid var(--line);border-radius:10px;padding:8px 11px;font-size:12px;line-height:1.35;max-width:300px;pointer-events:none}
-  #key b{display:block;font:700 11px var(--mono);letter-spacing:.1em;color:var(--dim);margin-bottom:4px}
-  #key div{display:grid;grid-template-columns:26px 1fr;gap:6px;align-items:center;margin:3px 0}#key svg{display:block}
-  #now{position:absolute;right:10px;top:10px;background:#0a0e16e6;border:1px solid var(--line);border-radius:10px;padding:7px 11px;font-size:12.5px;pointer-events:none;text-align:right}
-  #now .sw{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px}
-  .camcap{position:absolute;left:10px;top:8px;font-size:12px;background:#0a0e16e6;padding:4px 9px;border-radius:6px;pointer-events:none;border:1px solid var(--line)}
-  .camcap i{font-style:normal;font-weight:700}
-  .tcard .plain{font-size:12.5px;color:var(--text);margin-top:2px}
-  details.gloss{margin-top:6px}details.gloss summary{cursor:pointer;color:var(--cyan);font-weight:600}details.gloss dl{margin:6px 0 0}details.gloss dt{font-weight:700;margin-top:7px}details.gloss dd{margin:1px 0 0;color:#b7c4da;font-size:12.5px}
+  .tcard .nm{font-weight:700}.tcard .plain{font-size:12.5px;color:#b7c4da;margin:2px 0 6px}
+  .tcard .nums{display:grid;grid-template-columns:1fr 1fr;gap:8px}.tcard .nums b{display:block;font:700 22px var(--mono)}.tcard .nums span{font-size:11.5px;color:var(--dim)}
+  #who{display:grid;grid-template-columns:auto auto 1fr;gap:6px 12px;align-items:center;font-size:13px}
+  #who .p{display:flex;align-items:center;gap:6px;font-weight:700}#who .p i{width:12px;height:12px;border-radius:3px;display:inline-block}
+  #who .sub{font-size:11px;color:var(--dim)}
+  .chip{border-radius:8px;padding:0 7px;font-weight:700;color:#06101a}
+  #feed{font:12.5px/1.6 var(--mono)}#feed div{padding:2px 0;border-bottom:1px solid #182238}
+  #feed .ok{color:var(--good)}#feed .bad{color:#ff9aa4}#feed .hide{color:var(--amber)}
+  details#whatif summary{cursor:pointer;font:600 11px var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin:12px 0 8px}
 </style>
 </head>
 <body>
 <header>
-  <div class="brand"><span class="logo">◉</span><b>OCCLUSION</b> TRACKING LAB<small>Artemis EVA · multi-object tracking</small></div>
+  <div class="brand"><span class="logo">◉</span><b>OCCLUSION</b> TRACKING LAB</div>
   <label><span class="lt">Scenario</span> <select id="scenario"></select></label>
-  <label><span class="lt">Seed</span> <input type="number" id="seed" value="7" min="1" max="9999" style="width:70px"></label>
+  <label><span class="lt">Seed</span> <input type="number" id="seed" value="7" min="1" max="9999" style="width:64px"></label>
   <div class="spacer"></div>
   <div class="clock" id="clock">T+000.0 s</div>
   <button id="play">⏸ Pause</button>
   <div class="seg" id="speed"></div>
   <button id="reset">↺ Reset</button>
-  <button id="tourBtn" class="accent" title="Step-by-step guided tour">▶ Tour</button>
-  <a href="https://github.com/sadeeqgandalf/lunar-occlusion-tracking/blob/main/docs/OCCLUSION_GUIDE.md" target="_blank" rel="noopener"><button title="Learning guide: plain words, maths, code, papers">📘 Guide</button></a>
-  <a href="index.html"><button title="The ego-navigation lab">Mission Control →</button></a>
+  <button id="tourBtn" class="accent">▶ Tour</button>
+  <a href="https://github.com/sadeeqgandalf/lunar-occlusion-tracking/blob/main/docs/OCCLUSION_GUIDE.md" target="_blank" rel="noopener"><button title="Plain words, maths, code and papers">📘 Guide</button></a>
+  <a href="index.html"><button>Mission Control →</button></a>
 </header>
-<div id="goal"><b>Goal: don't lose them when you can't see them.</b> When someone walks behind a boulder, does the tracker keep their ID, or call them a new person when they reappear? Three trackers watch the <i>same</i> camera detections; the only difference is how they think about occlusion.</div>
+<div id="goal">
+  <b>Goal: keep the same ID on each person when they walk behind rocks.</b>
+  <span><svg width="22" height="22" viewBox="-11 -11 22 22"><circle r="8" fill="#fff"/><path d="M-8 1h16" stroke="#e5322d" stroke-width="3.5"/></svg><b>P1–P5</b> real person (suit stripe)</span>
+  <span><svg width="30" height="18"><rect x="1" y="1" width="28" height="16" rx="8" fill="#F3C300"/><text x="15" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="#06101a">#11</text></svg>tracker's ID</span>
+  <span><svg width="34" height="18"><rect x="1" y="1" width="32" height="16" rx="8" fill="none" stroke="#F3C300" stroke-width="1.5" stroke-dasharray="3 2"/><text x="17" y="13" text-anchor="middle" font-size="11" font-weight="700" fill="#F3C300">#11?</text></svg>hidden, best guess</span>
+  <span><svg width="26" height="20"><path d="M13 19 L3 2 L23 2 Z" fill="#000" opacity=".75"/></svg>blind zone</span>
+</div>
 <main class="trk">
   <div id="stage">
-    <div id="strip">
-      <span><svg width="26" height="22" viewBox="-13 -11 26 22"><circle r="7" fill="#fff"/><path d="M-7 1h14" stroke="#e5322d" stroke-width="3"/><path d="M1 -5 A 5 5 0 0 1 1 5" stroke="#d4a017" stroke-width="3" fill="none"/></svg><b>Suit stripe colour</b> = who the person <i>really</i> is (like NASA EVA suit stripes)</span>
-      <span><svg width="40" height="22"><rect x="6" y="2" width="16" height="18" rx="2" fill="hsla(23,82%,60%,.5)" stroke="hsl(23,82%,60%)" stroke-width="2"/><rect x="24" y="5" width="13" height="12" rx="3" fill="hsl(23,82%,60%)"/></svg><b>Mask / box / #tag colour</b> = the ID the tracker gave them</span>
-      <span><svg width="44" height="22"><rect x="2" y="3" width="16" height="16" rx="2" fill="hsla(23,82%,60%,.6)"/><text x="20" y="15" font-size="11" fill="#cfd8e3">→</text><rect x="28" y="3" width="16" height="16" rx="2" fill="hsla(160,82%,60%,.6)"/></svg><b>Same person, colour changes</b> = ID switch</span>
-      <span><svg width="30" height="22" viewBox="-15 -11 30 22"><ellipse rx="13" ry="9" fill="hsla(23,82%,60%,.2)" stroke="hsl(23,82%,60%)" stroke-width="2" stroke-dasharray="4 3"/><text y="4" text-anchor="middle" font-size="11" font-weight="700" fill="hsl(23,82%,60%)">?</text></svg><b>Dashed</b> = "lost sight, probably in here"</span>
-      <span><svg width="30" height="22"><path d="M15 21 L4 2 L26 2 Z" fill="#000" opacity=".7"/></svg><b>Blind zone</b> behind a boulder</span>
-    </div>
-    <div id="analogy">Real-life version: like watching friends walk behind pillars in a mall. A good watcher remembers where each one was heading, so when someone steps out, they know who it is. The naive watcher forgets anyone they can't see, and greets them as a stranger.</div>
     <canvas id="glAll"></canvas>
     <div id="mapwrap"><canvas id="map"></canvas><canvas id="ov3d"></canvas>
-      <div id="viewsw"><button data-v="3d" class="on">3D world (NASA models)</button><button data-v="2d">Top-down map</button></div>
-      <div id="load3d">Loading NASA 3D models…</div><div class="hint3d" id="hint3d">Drag to orbit · scroll to zoom · right-drag to pan<span id="gfxNote"></span></div>
-      <div id="now"></div>
+      <div id="viewsw"><button data-v="3d" class="on">3D</button><button data-v="2d">Map</button></div>
+      <div id="load3d">Loading NASA 3D models…</div>
+      <div class="hint3d" id="hint3d">Drag to orbit · scroll to zoom<span id="gfxNote"></span></div>
+      <div id="now" class="over"></div>
     </div>
-    <div id="camwrap"><canvas id="cam"></canvas><canvas id="ovcam"></canvas><div class="camcap">CAMERA VIEW (what the rover sees) · <i style="color:#ffb454">orange box</i> = detection · <i id="camTrk">coloured box</i> = tracked, dashed = believed hidden behind a rock</div></div>
+    <div id="camwrap"><canvas id="cam"></canvas><canvas id="ovcam"></canvas><div class="over camcap">Rover camera</div></div>
   </div>
   <aside id="right">
     <section>
-      <h3>Trackers <small>click to show on the map</small></h3>
+      <h3>Trackers <small>click one to show it</small></h3>
       <div id="cards"></div>
-      <label class="chk" style="margin-top:8px"><input type="checkbox" id="optTruth" checked> Show true positions</label>
     </section>
     <section>
-      <h3>Who's who <small>true person → ID the tracker gave</small></h3>
+      <h3>People <small>real person → tracker's ID</small></h3>
       <div id="who"></div>
-      <p class="hint">Each row is one real astronaut (suit stripe colour). A good tracker keeps <b>one</b> ID per person; every extra ID in the history is an identity lost.</p>
+      <label class="chk" style="margin-top:8px"><input type="checkbox" id="optTruth" checked> Show real people</label>
     </section>
-    <section class="log"><h3>What just happened</h3><div id="feed"></div></section>
+    <section class="log"><h3>What happened</h3><div id="feed"></div></section>
     <section>
-      <h3>ID switches so far <small>lower is better</small></h3>
-      <canvas id="chSw" class="chart" style="width:100%;height:120px"></canvas>
+      <h3>ID switches over time <small>lower is better</small></h3>
+      <canvas id="chSw" class="chart" style="width:100%;height:110px"></canvas>
     </section>
-    <section id="whatif">
-      <h3>What if…? <small>change the world, then Apply</small></h3>
-      <label class="slider">Detection rate when fully visible <b id="wv-pd">0.95</b><input type="range" id="w-pd" min="0.6" max="0.99" step="0.01" value="0.95"></label>
+    <details id="whatif">
+      <summary>What if…? (change the world)</summary>
+      <label class="slider">Detection rate <b id="wv-pd">0.95</b><input type="range" id="w-pd" min="0.6" max="0.99" step="0.01" value="0.95"></label>
       <label class="slider">False alarms per frame <b id="wv-clutter">0.8</b><input type="range" id="w-clutter" min="0" max="3" step="0.1" value="0.8"></label>
-      <label class="slider">Number of people <b id="wv-targets">5</b><input type="range" id="w-targets" min="2" max="10" step="1" value="5"></label>
-      <label class="slider">Share of low rocks (see heads over them) <b id="wv-lowFrac">0.35</b><input type="range" id="w-lowFrac" min="0" max="1" step="0.05" value="0.35"></label>
-      <label class="chk"><input type="checkbox" id="w-shadows"> Low polar sun: people can vanish into shadows</label>
-      <div class="btnrow" style="margin-top:6px"><button id="w-apply" class="accent">Apply (restart)</button><button id="w-reset">Scenario defaults</button></div>
-      <p class="hint" id="w-note">Each run uses the scenario's seed, so you can compare settings fairly. Single runs vary a lot: trust the 20-seed results in the README, not one run.</p>
-    </section>
-    <section>
-      <h3>Glossary</h3>
-      <details class="gloss" open><summary>Every word on this page, in plain English</summary>
-      <dl>
-        <dt>Detection <a href="https://github.com/sadeeqgandalf/lunar-occlusion-tracking/blob/main/docs/OCCLUSION_GUIDE.md#3-from-visibility-to-a-detection" target="_blank" rel="noopener" style="font-weight:400;font-size:11px">guide ↗</a></dt><dd>One "I see something here" from the camera in one frame. It has a position but no name. Some are false alarms (dust, glare).</dd>
-        <dt>Track / ID (#12) <a href="https://github.com/sadeeqgandalf/lunar-occlusion-tracking/blob/main/docs/OCCLUSION_GUIDE.md#4-following-one-person-the-constant-velocity-kalman-filter" target="_blank" rel="noopener" style="font-weight:400;font-size:11px">guide ↗</a></dt><dd>The tracker's running record of one person over time, with a number. Keeping the <i>same</i> number for the same person is the whole job.</dd>
-        <dt>Occlusion <a href="https://github.com/sadeeqgandalf/lunar-occlusion-tracking/blob/main/docs/OCCLUSION_GUIDE.md#1-what-the-camera-can-and-cannot-see" target="_blank" rel="noopener" style="font-weight:400;font-size:11px">guide ↗</a></dt><dd>Something blocks the camera's view of a person, here a boulder. They still exist; the camera just can't see them.</dd>
-        <dt>Coasting / hidden track <a href="https://github.com/sadeeqgandalf/lunar-occlusion-tracking/blob/main/docs/OCCLUSION_GUIDE.md#6-does-this-track-still-exist-where-occlusion-awareness-happens" target="_blank" rel="noopener" style="font-weight:400;font-size:11px">guide ↗</a></dt><dd>While someone is hidden, the tracker keeps guessing where they are from how they were moving (the dashed shapes). The ellipse is how unsure it is: bigger = less sure.</dd>
-        <dt>ID kept / ID switch <a href="https://github.com/sadeeqgandalf/lunar-occlusion-tracking/blob/main/docs/OCCLUSION_GUIDE.md#8-how-we-score-and-what-the-results-say" target="_blank" rel="noopener" style="font-weight:400;font-size:11px">guide ↗</a></dt><dd>When the person reappears, did they get their old number back (kept ✔) or a new one (switch ✘)? A new number means the system now thinks there are two different people.</dd>
-        <dt>ID kept through occlusion (big %)</dt><dd>Of people who were tracked, then hidden for 1–5 seconds, the share that got their old ID back. Higher is better.</dd>
-        <dt>IDF1</dt><dd>How consistently each real person carried one ID over the whole run (0 to 1, higher is better).</dd>
-        <dt>MOTA</dt><dd>Overall accuracy: penalises missed people, false tracks and ID switches together (up to 1, higher is better).</dd>
-        <dt>GOSPA</dt><dd>One error number in metres that combines position error, missed people and false tracks (lower is better).</dd>
-        <dt>Naive / Aware / Aware + neg. info</dt><dd>Three versions of the same tracker that differ only in how they treat hiding. See the cards above.</dd>
-      </dl></details>
-    </section>
+      <label class="slider">People <b id="wv-targets">5</b><input type="range" id="w-targets" min="2" max="9" step="1" value="5"></label>
+      <label class="slider">Low rocks (heads visible) <b id="wv-lowFrac">0.35</b><input type="range" id="w-lowFrac" min="0" max="1" step="0.05" value="0.35"></label>
+      <label class="chk"><input type="checkbox" id="w-shadows"> Polar shadows</label>
+      <div class="btnrow" style="margin-top:6px"><button id="w-apply" class="accent">Apply</button><button id="w-reset">Defaults</button></div>
+    </details>
   </aside>
 </main>
 <script type="module" src="src/ui/track.js"></script>

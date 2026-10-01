@@ -5,7 +5,7 @@
 import { THREE, toV, hash, fbm, makeRenderer, fitRenderer, loadModel, starfield, drawLabels, isLost, GFX } from './three-common.js';
 import { OrbitControls } from '../../vendor/three/examples/jsm/controls/OrbitControls.js';
 import { isHidden, hiddenCause } from '../mot/occlusion.js';
-import { idColor, stripeOf } from './idcolor.js';
+import { idColor, stripeOf, label, personName } from './idcolor.js';
 
 const MAST_H = 2.2, PERSON_H = 1.8;
 
@@ -142,7 +142,7 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
       g.visible = true;
       const hid = !t.vis.inFov || isHidden(t.vis);
       // the 3-D model IS the truth; only hidden people get a label, at their feet, so it never collides with the tracker's tag
-      if (showTruth && hid) labels1.push({ p: toV(t.x, t.y, height(t.x, t.y) - 0.2), text: `person ${t.id} · ${hiddenCause(t.vis) === 'shadow' ? 'in shadow' : 'behind rock'}`, color: '#ffffff', bg: '#e8ecf2cc', font: '11px system-ui', alpha: 0.9 });
+      if (showTruth && hid) labels1.push({ p: toV(t.x, t.y, height(t.x, t.y) - 0.2), text: `${personName(t.id)} ${hiddenCause(t.vis) === 'shadow' ? 'in shadow' : 'behind rock'}`, color: '#ffffff', bg: '#e8ecf2cc', font: '11px system-ui', alpha: 0.9 });
     }
     // camera pings (orange discs on the ground)
     sess.last.dets.forEach((d) => {
@@ -151,24 +151,25 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
       m.rotation.x = -Math.PI / 2; m.position.copy(toV(x, y, height(x, y) + 0.05)); m.renderOrder = 5;
     });
     // tracker beliefs: solid ground ring + name tag when seen; translucent search area when hidden
-    for (const t of sess.runs[sel].tracker.tracks) {
+    const TR = sess.runs[sel].tracker;
+    for (const t of TR.tracks) {
       if (!t.confirmed) continue;
-      const lost = t.lastSeen > 3, x = t.x[0], y = t.x[1], gh = height(x, y);
+      const lost = t.lastSeen > 3, x = t.x[0], y = t.x[1], gh = height(x, y), n = label(TR, t.id);
       if (lost) {
         const a = t.P.get(0, 0), b = t.P.get(0, 1), d2 = t.P.get(1, 1), mm = (a + d2) / 2, q = Math.sqrt(((a - d2) / 2) ** 2 + b * b), k = Math.sqrt(5.991);
         const m = getPool('area', () => new THREE.Mesh(new THREE.CircleGeometry(1, 48), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide })));
-        const ic = idColor(t.id); m.material.color.set(ic); m.rotation.set(-Math.PI / 2, 0, 0.5 * Math.atan2(2 * b, a - d2));
+        const ic = idColor(n); m.material.color.set(ic); m.rotation.set(-Math.PI / 2, 0, 0.5 * Math.atan2(2 * b, a - d2));
         m.scale.set(Math.max(0.6, k * Math.sqrt(mm + q)), Math.max(0.6, k * Math.sqrt(Math.max(mm - q, 0))), 1);
         m.position.copy(toV(x, y, gh + 0.06));
-        labels1.push({ p: toV(x, y, gh + 1.0), text: `#${t.id} lost sight · searching`, color: ic, dashed: true });
-        labels2.push({ p: toV(x, y, gh + PERSON_H + 0.4), text: `#${t.id} behind rock?`, color: ic, dashed: true });
+        labels1.push({ p: toV(x, y, gh + 1.0), text: `#${n}?`, color: ic, dashed: true });
+        labels2.push({ p: toV(x, y, gh + PERSON_H + 0.4), text: `#${n}?`, color: ic, dashed: true });
       } else {
         const m = getPool('ring', () => new THREE.Mesh(new THREE.RingGeometry(0.55, 0.78, 40), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthTest: false })));
-        const ic = idColor(t.id); m.material.color.set(ic); m.rotation.x = -Math.PI / 2; m.position.copy(toV(x, y, gh + 0.07)); m.renderOrder = 6;
-        labels1.push({ p: toV(x, y, gh + PERSON_H + 1.05), text: `#${t.id}`, color: ic }); // camera view: box + tag drawn per person below
+        const ic = idColor(n); m.material.color.set(ic); m.rotation.x = -Math.PI / 2; m.position.copy(toV(x, y, gh + 0.07)); m.renderOrder = 6;
+        labels1.push({ p: toV(x, y, gh + PERSON_H + 1.05), text: `#${n}`, color: ic }); // camera view: box + tag drawn per person below
       }
     }
-    for (const mk of marks) labels1.push({ p: toV(mk.x, mk.y, height(mk.x, mk.y) + PERSON_H + 1.9), text: mk.kept ? '✔ same ID kept' : '✘ lost them: new ID', color: mk.kept ? '#4ade80' : '#ff8a8a', bg: mk.kept ? '#14532d' : '#4c1219', fg: mk.kept ? '#4ade80' : '#ff8a8a', font: 'bold 13px system-ui', alpha: mk.alpha });
+    for (const mk of marks) labels1.push({ p: toV(mk.x, mk.y, height(mk.x, mk.y) + PERSON_H + 1.9), text: mk.kept ? '✔ same ID' : '✘ new ID', color: mk.kept ? '#4ade80' : '#ff8a8a', bg: mk.kept ? '#14532d' : '#4c1219', fg: mk.kept ? '#4ade80' : '#ff8a8a', font: 'bold 13px system-ui', alpha: mk.alpha });
 
     // rover camera: at the mast head, looking along the simulated optical axis, same horizontal field of view
     const cam = w.cam, eye = toV(cam.x, cam.y, height(cam.x, cam.y) + MAST_H);
@@ -186,13 +187,13 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
       for (const t of w.targets) {
         const g = people.get(t.id), kid = M.lastMatch.get(t.id), seen = t.vis.inFov && !isHidden(t.vis);
         if (!g || !seen) continue;
-        const has = kid !== undefined && live.has(kid), c = has ? idColor(kid) : '#9aa3b2';
+        const has = kid !== undefined && live.has(kid), n = has ? label(T, kid) : 0, c = has ? idColor(n) : '#9aa3b2';
         if (has) {
           const mm = maskMat(c), saved = [];
           g.traverse((o) => { if (o.isMesh) { saved.push([o, o.material]); o.material = mm; } });
           R.render(g, roverCam); saved.forEach(([o, mat]) => { o.material = mat; });
         }
-        boxes.push({ obj: g, color: c, text: has ? `#${kid}` : 'no ID yet', dashed: !has });
+        boxes.push({ obj: g, color: c, text: has ? `#${n}` : 'no ID', dashed: !has });
       }
       R.autoClear = true;
       drawLabels(camOverlay, roverCam, labels2);
