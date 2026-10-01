@@ -5,6 +5,7 @@
 import { THREE, toV, hash, fbm, makeRenderer, fitRenderer, loadModel, starfield, drawLabels, isLost, GFX } from './three-common.js';
 import { OrbitControls } from '../../vendor/three/examples/jsm/controls/OrbitControls.js';
 import { isHidden, hiddenCause } from '../mot/occlusion.js';
+import { idColor, stripeOf } from './idcolor.js';
 
 const MAST_H = 2.2, PERSON_H = 1.8;
 
@@ -110,6 +111,10 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
     // people (NASA astronaut model), one per simulated target
     for (const t of w.targets) {
       const g = astro ? astro.clone() : new THREE.Mesh(new THREE.CapsuleGeometry(0.35, 1.1, 4, 12), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+      // true identity: coloured suit stripes (waist band + helmet stripe), like real EVA suit markings
+      const sc = new THREE.Color(stripeOf(t.id).hex), smat = new THREE.MeshStandardMaterial({ color: sc, emissive: sc, emissiveIntensity: 0.35 });
+      const band = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.055, 8, 28), smat); band.rotation.x = Math.PI / 2; band.position.y = 1.0; g.add(band);
+      const crest = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.05, 0.34), smat); crest.position.y = PERSON_H - 0.02; g.add(crest);
       dyn.add(g); people.set(t.id, g);
     }
   }
@@ -152,16 +157,15 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
       if (lost) {
         const a = t.P.get(0, 0), b = t.P.get(0, 1), d2 = t.P.get(1, 1), mm = (a + d2) / 2, q = Math.sqrt(((a - d2) / 2) ** 2 + b * b), k = Math.sqrt(5.991);
         const m = getPool('area', () => new THREE.Mesh(new THREE.CircleGeometry(1, 48), new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide })));
-        m.material.color.copy(col); m.rotation.set(-Math.PI / 2, 0, 0.5 * Math.atan2(2 * b, a - d2));
+        const ic = idColor(t.id); m.material.color.set(ic); m.rotation.set(-Math.PI / 2, 0, 0.5 * Math.atan2(2 * b, a - d2));
         m.scale.set(Math.max(0.6, k * Math.sqrt(mm + q)), Math.max(0.6, k * Math.sqrt(Math.max(mm - q, 0))), 1);
         m.position.copy(toV(x, y, gh + 0.06));
-        labels1.push({ p: toV(x, y, gh + 1.0), text: `#${t.id} lost sight · searching`, color, dashed: true });
-        labels2.push({ p: toV(x, y, gh + PERSON_H + 0.4), text: `#${t.id} behind rock?`, color, dashed: true });
+        labels1.push({ p: toV(x, y, gh + 1.0), text: `#${t.id} lost sight · searching`, color: ic, dashed: true });
+        labels2.push({ p: toV(x, y, gh + PERSON_H + 0.4), text: `#${t.id} behind rock?`, color: ic, dashed: true });
       } else {
         const m = getPool('ring', () => new THREE.Mesh(new THREE.RingGeometry(0.55, 0.78, 40), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthTest: false })));
-        m.material.color.copy(col); m.rotation.x = -Math.PI / 2; m.position.copy(toV(x, y, gh + 0.07)); m.renderOrder = 6;
-        labels1.push({ p: toV(x, y, gh + PERSON_H + 1.05), text: `#${t.id}`, color });
-        labels2.push({ p: toV(x, y, gh + PERSON_H + 0.4), text: `#${t.id}`, color });
+        const ic = idColor(t.id); m.material.color.set(ic); m.rotation.x = -Math.PI / 2; m.position.copy(toV(x, y, gh + 0.07)); m.renderOrder = 6;
+        labels1.push({ p: toV(x, y, gh + PERSON_H + 1.05), text: `#${t.id}`, color: ic }); // camera view: box + tag drawn per person below
       }
     }
     for (const mk of marks) labels1.push({ p: toV(mk.x, mk.y, height(mk.x, mk.y) + PERSON_H + 1.9), text: mk.kept ? '✔ same ID kept' : '✘ lost them: new ID', color: mk.kept ? '#4ade80' : '#ff8a8a', bg: mk.kept ? '#14532d' : '#4c1219', fg: mk.kept ? '#4ade80' : '#ff8a8a', font: 'bold 13px system-ui', alpha: mk.alpha });
@@ -175,11 +179,51 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
       for (const p of people.values()) p.visible = true;
       const rings = [...pool.ring, ...pool.area, ...pool.ping]; rings.forEach((m) => { m.userData.v = m.visible; m.visible = false; }); // camera image = the scene only
       R.render(scene, roverCam); rings.forEach((m) => { m.visible = m.userData.v; });
+      // ID masks: re-draw each tracked person in their track's colour with depth test LessEqual against the scene
+      // just rendered, so only their VISIBLE pixels are painted (a modal instance mask, as in MOTS datasets)
+      const T = sess.runs[sel].tracker, M = sess.runs[sel].metrics, live = new Set(T.reported().map((k) => k.id)), boxes = [];
+      R.autoClear = false;
+      for (const t of w.targets) {
+        const g = people.get(t.id), kid = M.lastMatch.get(t.id), seen = t.vis.inFov && !isHidden(t.vis);
+        if (!g || !seen) continue;
+        const has = kid !== undefined && live.has(kid), c = has ? idColor(kid) : '#9aa3b2';
+        if (has) {
+          const mm = maskMat(c), saved = [];
+          g.traverse((o) => { if (o.isMesh) { saved.push([o, o.material]); o.material = mm; } });
+          R.render(g, roverCam); saved.forEach(([o, mat]) => { o.material = mat; });
+        }
+        boxes.push({ obj: g, color: c, text: has ? `#${kid}` : 'no ID yet', dashed: !has });
+      }
+      R.autoClear = true;
       drawLabels(camOverlay, roverCam, labels2);
+      drawBoxes(camOverlay, camEl, roverCam, boxes);
     }
     for (const p of people.values()) p.visible = showTruth;
     if (viewport(mainEl, free)) { controls.update(); R.render(scene, free); drawLabels(mainOverlay, free, labels1); }
     R.setScissorTest(false);
+  }
+
+  const _masks = new Map();
+  const maskMat = (c) => {
+    if (!_masks.has(c)) _masks.set(c, new THREE.MeshBasicMaterial({ color: new THREE.Color(c), transparent: true, opacity: 0.5, depthWrite: false, depthFunc: THREE.LessEqualDepth, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+    return _masks.get(c);
+  };
+  /** Bounding boxes from each person's projected 3-D extent, in their ID colour, drawn on the camera overlay. */
+  const _box = new THREE.Box3(), _v = new THREE.Vector3();
+  function drawBoxes(ov, el, cam, items) {
+    const c = ov.getContext('2d'), w = el.clientWidth, h = el.clientHeight;
+    for (const it of items) {
+      _box.setFromObject(it.obj); let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (let i = 0; i < 8; i++) {
+        _v.set(i & 1 ? _box.max.x : _box.min.x, i & 2 ? _box.max.y : _box.min.y, i & 4 ? _box.max.z : _box.min.z).project(cam);
+        if (_v.z > 1) continue;
+        const x = (_v.x * 0.5 + 0.5) * w, y = (-_v.y * 0.5 + 0.5) * h; x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+      }
+      if (!(x1 > x0) || x1 < 0 || x0 > w) continue;
+      c.save(); c.strokeStyle = it.color; c.lineWidth = 2.5; c.setLineDash(it.dashed ? [5, 4] : []); c.strokeRect(x0 - 2, y0 - 2, x1 - x0 + 4, y1 - y0 + 4);
+      c.font = 'bold 12px system-ui'; const tw = c.measureText(it.text).width + 10;
+      c.setLineDash([]); c.fillStyle = it.color; c.fillRect(x0 - 2, y0 - 20, tw, 17); c.fillStyle = '#06101a'; c.fillText(it.text, x0 + 3, y0 - 7); c.restore();
+    }
   }
 
   /** Restrict drawing to the part of the shared canvas under `el` (WebGL viewports start bottom-left). */

@@ -6,6 +6,7 @@ import { wrapAngle, TAU } from '../core/linalg.js';
 import { isHidden, hiddenCause } from '../mot/occlusion.js';
 import { runTour } from './tour.js';
 import { lineChart } from './charts.js';
+import { idColor, idColorA, stripeOf } from './idcolor.js';
 
 const $ = (id) => document.getElementById(id);
 const S = { scenario: 'boulders', seed: 7, speed: 2, paused: false, sel: 0, showTruth: true, view: '3d', overrides: {}, sw: [] };
@@ -21,20 +22,29 @@ const BLURB = {
   'Occlusion-aware': 'Expected detection probability = P_D × visibility, so a miss behind a rock is not evidence they left.',
   Naive: 'Every miss counts as evidence the person is gone. After a few frames the track is deleted.',
 };
-let sess, feed = [], pending = new Map(), seenEv = [], prevHidden = new Map(), marks = [];
+let sess, feed = [], pending = new Map(), seenEv = [], prevHidden = new Map(), marks = [], prevMatch = new Map(), prevSel = -1, idHist = new Map();
 
 function newSession() {
   sess = new MotSession({ scenario: S.scenario, seed: S.seed, overrides: S.overrides });
   S.sw = sess.runs.map(() => []);
-  feed = []; pending = new Map(); seenEv = sess.runs.map(() => 0); prevHidden = new Map(); marks = [];
+  feed = []; pending = new Map(); seenEv = sess.runs.map(() => 0); prevHidden = new Map(); marks = []; prevMatch = new Map(); idHist = new Map();
   pushFeed(`${MOT_SCENARIOS[S.scenario].label}: ${MOT_SCENARIOS[S.scenario].blurb}`, '');
   buildCards();
 }
 
 // ------------------------------------------------------------------ feed
 function pushFeed(text, cls) { feed.unshift({ t: sess.world.t, text, cls }); if (feed.length > 60) feed.pop(); }
+const chip = (txt, color) => `<span style="background:${color};color:#06101a;border-radius:8px;padding:0 6px;font-weight:700">${txt}</span>`;
 function updateFeed() {
   const W = sess.world;
+  // ID switches for the tracker on display: the same real person (stripe colour) now carries a different track ID
+  if (prevSel !== S.sel) { prevMatch = new Map(sess.runs[S.sel].metrics.lastMatch); prevSel = S.sel; idHist = new Map(); }
+  for (const [gid, kid] of sess.runs[S.sel].metrics.lastMatch) {
+    const before = prevMatch.get(gid);
+    if (before !== undefined && before !== kid) { const st = stripeOf(gid); pushFeed(`${chip(st.name + ' stripe', st.hex)} person ${gid}: ID ${chip('#' + before, idColor(before))} → ${chip('#' + kid, idColor(kid))} · ID switch`, 'bad'); }
+    prevMatch.set(gid, kid);
+    const h = idHist.get(gid) || []; if (h[h.length - 1] !== kid) { h.push(kid); idHist.set(gid, h); }
+  }
   for (const g of W.targets) {
     const hid = isHidden(g.vis), was = prevHidden.get(g.id);
     if (hid && was === false) pushFeed(hiddenCause(g.vis) === 'shadow' ? `Crew ${g.id} walked into deep shadow (in line of sight, but too dark to detect)` : `Crew ${g.id} went behind a boulder`, 'hide');
@@ -82,6 +92,14 @@ function updateCards() {
     $('mota' + i).textContent = Number.isFinite(s.mota) ? s.mota.toFixed(2) : '–';
     $('gospa' + i).textContent = s.gospa.toFixed(2);
   });
+  // who's who: one row per real person, with their ID history under the tracker on display
+  const live = new Set(sess.runs[S.sel].tracker.reported().map((k) => k.id)), lm = sess.runs[S.sel].metrics.lastMatch;
+  $('who').innerHTML = sess.world.targets.map((g) => {
+    const st = stripeOf(g.id), kid = lm.get(g.id), hid = isHidden(g.vis), now = kid !== undefined && live.has(kid) && !hid ? chip('#' + kid, idColor(kid)) : `<i style="color:#9aa3b2">${hid ? 'hidden' : 'no ID'}</i>`;
+    const hist = (idHist.get(g.id) || []).map((k) => chip('#' + k, idColor(k))).join(' → ') || '–';
+    const n = (idHist.get(g.id) || []).length;
+    return `<div style="display:grid;grid-template-columns:14px 64px 70px 1fr;gap:6px;align-items:center;font-size:12px;margin:3px 0"><span style="width:12px;height:12px;border-radius:3px;background:${st.hex}"></span><span>person ${g.id}</span><span>${now}</span><span style="color:${n > 1 ? '#ff9aa4' : '#9fb0c9'}">${hist}</span></div>`;
+  }).join('');
   $('feed').innerHTML = feed.map((f) => `<div class="${f.cls}"><b>${f.t.toFixed(0).padStart(4)}s</b> ${f.text}</div>`).join('');
   $('clock').textContent = `T+${sess.world.t.toFixed(1).padStart(5, '0')} s`;
   lineChart($('chSw'), { title: 'cumulative ID switches (green / blue / red trackers)', tMin: 0, tMax: Math.max(10, sess.world.t), series: S.sw.map((pts, i) => ({ color: COLORS[i], width: i === S.sel ? 2.2 : 1.4, pts })) });
@@ -113,11 +131,12 @@ function drawRock(c, px, py, r, shape) {
   const g = c.createRadialGradient(px - r * 0.35, py - r * 0.35, r * 0.1, px, py, r * 1.1); g.addColorStop(0, '#8c9099'); g.addColorStop(1, '#3a3d44');
   c.fillStyle = g; c.fill(); c.strokeStyle = '#25272c'; c.lineWidth = 1.5; c.stroke();
 }
-function drawAstronaut(c, px, py, r, heading, alpha) {
+function drawAstronaut(c, px, py, r, heading, alpha, stripe = '#cfd2d6') {
   c.save(); c.globalAlpha = alpha; c.translate(px, py); c.rotate(-heading);
-  c.fillStyle = '#cfd2d6'; c.beginPath(); c.roundRect(-r * 1.25, -r * 0.7, r * 0.7, r * 1.4, r * 0.25); c.fill(); // backpack
+  c.fillStyle = stripe; c.beginPath(); c.roundRect(-r * 1.25, -r * 0.7, r * 0.7, r * 1.4, r * 0.25); c.fill(); // backpack = suit stripe colour (true identity)
   c.fillStyle = '#ffffff'; c.beginPath(); c.arc(0, 0, r, 0, TAU); c.fill();                                      // suit/helmet
   c.strokeStyle = '#d4a017'; c.lineWidth = r * 0.55; c.beginPath(); c.arc(0, 0, r * 0.62, -0.9, 0.9); c.stroke(); // gold visor = facing
+  c.strokeStyle = stripe; c.lineWidth = r * 0.28; c.beginPath(); c.arc(0, 0, r * 0.98, 1.6, 4.7); c.stroke();     // stripe band
   c.restore();
 }
 function tag(c, x, y, text, col, dashed) {
@@ -165,7 +184,7 @@ function drawMap() {
   if (S.showTruth) for (const t of w.targets) {
     const [px, py] = P(t.x, t.y), hid = !t.vis.inFov || isHidden(t.vis);
     if (t.trail.length > 1) { c.strokeStyle = '#ffffff26'; c.lineWidth = 1.5; c.setLineDash([2, 4]); c.beginPath(); t.trail.forEach(([x, y], i) => { const q = P(x, y); i ? c.lineTo(...q) : c.moveTo(...q); }); c.stroke(); c.setLineDash([]); }
-    drawAstronaut(c, px, py, r, t.h, hid ? 0.45 : 1);
+    drawAstronaut(c, px, py, r, t.h, hid ? 0.45 : 1, stripeOf(t.id).hex);
     c.fillStyle = hid ? '#ffffff99' : '#ffffffdd'; c.font = '11px system-ui'; c.fillText(hid ? `person ${t.id} · ${hiddenCause(t.vis) === 'shadow' ? 'in shadow' : 'behind rock'}` : `person ${t.id}`, px - r, py + r + 13);
   }
   // camera pings this frame (orange); in training view, false alarms are tagged
@@ -179,17 +198,17 @@ function drawMap() {
   const T = sess.runs[S.sel].tracker;
   for (const t of T.tracks) {
     if (!t.confirmed) continue;
-    const [px, py] = P(t.x[0], t.x[1]), lost = t.lastSeen > 3;
+    const [px, py] = P(t.x[0], t.x[1]), lost = t.lastSeen > 3, tc = idColor(t.id);
     if (lost) {
       const a = t.P.get(0, 0), b = t.P.get(0, 1), d2 = t.P.get(1, 1), m = (a + d2) / 2, q = Math.sqrt(((a - d2) / 2) ** 2 + b * b), k = Math.sqrt(5.991);
       c.save(); c.translate(px, py); c.rotate(-0.5 * Math.atan2(2 * b, a - d2));
       c.beginPath(); c.ellipse(0, 0, Math.max(r + 4, k * Math.sqrt(m + q) * s), Math.max(r + 4, k * Math.sqrt(Math.max(m - q, 0)) * s), 0, 0, TAU);
-      c.fillStyle = col + '2e'; c.fill(); c.setLineDash([6, 4]); c.strokeStyle = col; c.lineWidth = 2; c.stroke(); c.setLineDash([]); c.restore();
-      c.fillStyle = col; c.font = 'bold 14px system-ui'; c.textAlign = 'center'; c.fillText('?', px, py + 5); c.textAlign = 'left';
-      tag(c, px + r + 4, py - r, `#${t.id} lost sight · searching`, col, true);
+      c.fillStyle = idColorA(t.id, 0.18); c.fill(); c.setLineDash([6, 4]); c.strokeStyle = tc; c.lineWidth = 2; c.stroke(); c.setLineDash([]); c.restore();
+      c.fillStyle = tc; c.font = 'bold 14px system-ui'; c.textAlign = 'center'; c.fillText('?', px, py + 5); c.textAlign = 'left';
+      tag(c, px + r + 4, py - r, `#${t.id} lost sight · searching`, tc, true);
     } else {
-      c.strokeStyle = col; c.lineWidth = 3; c.beginPath(); c.arc(px, py, r + 5, 0, TAU); c.stroke();
-      tag(c, px + r + 6, py - r - 2, `#${t.id}`, col, false);
+      c.strokeStyle = tc; c.lineWidth = 3; c.beginPath(); c.arc(px, py, r + 5, 0, TAU); c.stroke();
+      tag(c, px + r + 6, py - r - 2, `#${t.id}`, tc, false);
     }
   }
   // reappearance verdicts (fade after 4 s)
@@ -226,6 +245,7 @@ function drawCam() {
       const t = it.t, u = U(t.vis.bearing), yb = ground(it.d), h = (fv * 1.8) / it.d, wpx = Math.max(4, (f * 0.75) / it.d);
       c.fillStyle = '#d0d3d8'; c.fillRect(u - wpx * 0.6, yb - h * 0.8, wpx * 0.25, h * 0.4);       // backpack
       c.fillStyle = '#f2f2f2'; c.fillRect(u - wpx / 2, yb - h * 0.82, wpx, h * 0.82);              // suit
+      c.fillStyle = stripeOf(t.id).hex; c.fillRect(u - wpx / 2, yb - h * 0.5, wpx, Math.max(2, h * 0.07)); // waist stripe = true identity
       c.beginPath(); c.arc(u, yb - h * 0.88, wpx * 0.55, 0, TAU); c.fill();                          // helmet
       c.fillStyle = '#d4a017'; c.beginPath(); c.arc(u, yb - h * 0.88, wpx * 0.38, 0, TAU); c.fill(); // gold visor
     }
@@ -241,8 +261,9 @@ function drawCam() {
     const dx = t.x[0] - cam.x, dy = t.x[1] - cam.y, d = Math.hypot(dx, dy), brg = Math.atan2(dy, dx);
     if (Math.abs(wrapAngle(brg - cam.th)) > cam.fov / 2 || d < 1) continue;
     const u = U(brg), yb = ground(d), h = (fv * 1.8) / d, wpx = Math.max(12, (f * 1.3) / d), lost = t.lastSeen > 3;
-    c.strokeStyle = col; c.lineWidth = 2.5; c.setLineDash(lost ? [5, 4] : []); c.strokeRect(u - wpx / 2, yb - h * 1.1 - 2, wpx, h * 1.2 + 4); c.setLineDash([]);
-    tag(c, u - wpx / 2, yb - h * 1.1 - 6, lost ? `#${t.id} behind rock?` : `#${t.id}`, col, lost);
+    const tc = idColor(t.id);
+    c.strokeStyle = tc; c.lineWidth = 2.5; c.setLineDash(lost ? [5, 4] : []); c.strokeRect(u - wpx / 2, yb - h * 1.1 - 2, wpx, h * 1.2 + 4); c.setLineDash([]);
+    tag(c, u - wpx / 2, yb - h * 1.1 - 6, lost ? `#${t.id} behind rock?` : `#${t.id}`, tc, lost);
   }
 }
 

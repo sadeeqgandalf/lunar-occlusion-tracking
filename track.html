@@ -60,12 +60,11 @@
 <main class="trk">
   <div id="stage">
     <div id="strip">
-      <span><svg width="22" height="22" viewBox="-11 -11 22 22"><rect x="-7" y="-4" width="5" height="8" rx="1.5" fill="#d9d9d9"/><circle r="6" fill="#fff"/><path d="M1 -4 A 4.5 4.5 0 0 1 1 4" stroke="#d4a017" stroke-width="3" fill="none"/></svg><b>Astronaut</b> where they really are · faded = behind a rock</span>
-      <span><svg width="44" height="22"><rect x="1" y="4" width="40" height="15" rx="7" fill="var(--trk)"/><text x="21" y="15.5" text-anchor="middle" font-size="11" font-weight="700" fill="#06101a">#12</text></svg><b>Name tag</b> = tracker says "that's #12"</span>
-      <span><svg width="30" height="22" viewBox="-15 -11 30 22"><ellipse rx="13" ry="9" fill="var(--trk)" fill-opacity=".18" stroke="var(--trk)" stroke-width="2" stroke-dasharray="4 3"/><text y="4" text-anchor="middle" font-size="11" font-weight="700" fill="var(--trk)">?</text></svg><b>Search area</b> = "lost sight, probably in here"</span>
-      <span><svg width="22" height="22" viewBox="-11 -11 22 22"><circle r="6" fill="none" stroke="#ffb454" stroke-width="2"/><path d="M-9 0h5M4 0h5M0 -9v5M0 4v5" stroke="#ffb454" stroke-width="2"/></svg><b>Camera ping</b> (grey tag = false alarm)</span>
-      <span><svg width="30" height="22"><path d="M15 21 L4 2 L26 2 Z" fill="#000" opacity=".7"/><path d="M10 9 l3-4 5 1 2 4-3 3-5 0z" fill="#6b6e76"/></svg><b>Blind zone</b> behind a boulder</span>
-      <span><b style="color:#4ade80">✔ same ID</b> / <b style="color:#ff6b6b">✘ new ID</b> when someone reappears</span>
+      <span><svg width="26" height="22" viewBox="-13 -11 26 22"><circle r="7" fill="#fff"/><path d="M-7 1h14" stroke="#e5322d" stroke-width="3"/><path d="M1 -5 A 5 5 0 0 1 1 5" stroke="#d4a017" stroke-width="3" fill="none"/></svg><b>Suit stripe colour</b> = who the person <i>really</i> is (like NASA EVA suit stripes)</span>
+      <span><svg width="40" height="22"><rect x="6" y="2" width="16" height="18" rx="2" fill="hsla(23,82%,60%,.5)" stroke="hsl(23,82%,60%)" stroke-width="2"/><rect x="24" y="5" width="13" height="12" rx="3" fill="hsl(23,82%,60%)"/></svg><b>Mask / box / #tag colour</b> = the ID the tracker gave them</span>
+      <span><svg width="44" height="22"><rect x="2" y="3" width="16" height="16" rx="2" fill="hsla(23,82%,60%,.6)"/><text x="20" y="15" font-size="11" fill="#cfd8e3">→</text><rect x="28" y="3" width="16" height="16" rx="2" fill="hsla(160,82%,60%,.6)"/></svg><b>Same person, colour changes</b> = ID switch</span>
+      <span><svg width="30" height="22" viewBox="-15 -11 30 22"><ellipse rx="13" ry="9" fill="hsla(23,82%,60%,.2)" stroke="hsl(23,82%,60%)" stroke-width="2" stroke-dasharray="4 3"/><text y="4" text-anchor="middle" font-size="11" font-weight="700" fill="hsl(23,82%,60%)">?</text></svg><b>Dashed</b> = "lost sight, probably in here"</span>
+      <span><svg width="30" height="22"><path d="M15 21 L4 2 L26 2 Z" fill="#000" opacity=".7"/></svg><b>Blind zone</b> behind a boulder</span>
     </div>
     <div id="analogy">Real-life version: like watching friends walk behind pillars in a mall. A good watcher remembers where each one was heading, so when someone steps out, they know who it is. The naive watcher forgets anyone they can't see, and greets them as a stranger.</div>
     <canvas id="glAll"></canvas>
@@ -81,6 +80,11 @@
       <h3>Trackers <small>click to show on the map</small></h3>
       <div id="cards"></div>
       <label class="chk" style="margin-top:8px"><input type="checkbox" id="optTruth" checked> Show true positions</label>
+    </section>
+    <section>
+      <h3>Who's who <small>true person → ID the tracker gave</small></h3>
+      <div id="who"></div>
+      <p class="hint">Each row is one real astronaut (suit stripe colour). A good tracker keeps <b>one</b> ID per person; every extra ID in the history is an identity lost.</p>
     </section>
     <section class="log"><h3>What just happened</h3><div id="feed"></div></section>
     <section>

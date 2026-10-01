@@ -202,6 +202,22 @@ This posterior is not Gaussian, so it is moment-matched: weight the same 64 samp
 
 ---
 
+## 8½. Seeing identities: stripes, masks, boxes
+
+**In plain words.** Two colour codes, each with one meaning:
+
+| What you see | What it means |
+|---|---|
+| Suit **stripe** colour (waist band, helmet stripe; the backpack in the map) | Who the person **really** is. NASA does this on real EVA suits: red commander stripes from Apollo 13 onward, so cameras could tell moonwalkers apart [G6]. |
+| **Mask** (visible pixels only), **box** and **#tag** colour | The **ID the tracker gave**. Each ID gets a colour from a high-contrast palette, and IDs on screen together never share one. |
+| The same stripe carrying a new mask colour | An **ID switch**. The feed announces it, and the **Who's who** panel lists each person's full ID history. |
+
+**The maths of the mask.** The camera view is rendered once normally. Then each tracked person is drawn again in their ID colour with the depth test `LessEqual` against the depth buffer of that first render, so **only the pixels that are actually visible** get painted. Parts behind a rock stay uncoloured. That is a *modal* instance mask, the convention used by MOTS datasets.
+
+**In the code:** `src/ui/idcolor.js` (both colour codes); `src/ui/world3d.js` (mask pass and boxes from each person's projected 3-D extent); `src/ui/track.js` (feed announcements, Who's who).
+
+**Try it:** run *Boulder field* at 8× for two minutes and read the Who's who panel. Rows with long ID histories are people whose identity kept being lost. Look for an ID that appears in **two different rows**: that is an identity swap between two people.
+
 ## 9. Exercises
 
 Each comes with what to look for, not a promised answer. Measure it.
