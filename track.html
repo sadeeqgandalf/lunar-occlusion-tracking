@@ -23,7 +23,17 @@
   .tcard p{margin:6px 0 0;font-size:12px;color:#b7c4da}
   #feed{font:12px/1.5 var(--mono);max-height:260px;overflow:auto}#feed div{padding:3px 0;border-bottom:1px solid #182238}
   #feed .ok{color:var(--good)}#feed .bad{color:var(--bad)}#feed .hide{color:var(--amber)}
-  .legend2{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11px;color:var(--dim);margin-top:6px}.legend2 i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+  #strip{display:flex;flex-wrap:wrap;gap:6px 18px;padding:7px 12px;border-bottom:1px solid var(--line);background:#0c1322;font-size:12.5px;align-items:center}#strip span{display:flex;align-items:center;gap:6px}#strip b{font-weight:700}
+  #analogy{padding:6px 12px;font-size:12.5px;color:#b7c4da;background:#0a1020;border-bottom:1px solid var(--line)}
+  #oldkey{position:absolute;left:10px;top:10px;background:#0a0e16e6;border:1px solid var(--line);border-radius:10px;padding:8px 11px;font-size:12px;line-height:1.35;max-width:300px;pointer-events:none}
+  #key b{display:block;font:700 11px var(--mono);letter-spacing:.1em;color:var(--dim);margin-bottom:4px}
+  #key div{display:grid;grid-template-columns:26px 1fr;gap:6px;align-items:center;margin:3px 0}#key svg{display:block}
+  #now{position:absolute;right:10px;top:10px;background:#0a0e16e6;border:1px solid var(--line);border-radius:10px;padding:7px 11px;font-size:12.5px;pointer-events:none;text-align:right}
+  #now .sw{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px}
+  .camcap{position:absolute;left:10px;top:8px;font-size:12px;background:#0a0e16e6;padding:4px 9px;border-radius:6px;pointer-events:none;border:1px solid var(--line)}
+  .camcap i{font-style:normal;font-weight:700}
+  .tcard .plain{font-size:12.5px;color:var(--text);margin-top:2px}
+  details.gloss{margin-top:6px}details.gloss summary{cursor:pointer;color:var(--cyan);font-weight:600}details.gloss dl{margin:6px 0 0}details.gloss dt{font-weight:700;margin-top:7px}details.gloss dd{margin:1px 0 0;color:#b7c4da;font-size:12.5px}
 </style>
 </head>
 <body>
@@ -41,20 +51,42 @@
 <div id="goal"><b>Goal: don't lose them when you can't see them.</b> When someone walks behind a boulder, does the tracker keep their ID, or call them a new person when they reappear? Three trackers watch the <i>same</i> camera detections; the only difference is how they think about occlusion.</div>
 <main class="trk">
   <div id="stage">
-    <div id="mapwrap"><canvas id="map"></canvas><div class="cap">BIRD'S-EYE · dark wedges = where the camera is blind</div></div>
-    <div id="camwrap"><canvas id="cam"></canvas><div class="cap">CAMERA VIEW · solid box = tracked · dashed = believed hidden</div></div>
+    <div id="strip">
+      <span><svg width="22" height="22" viewBox="-11 -11 22 22"><rect x="-7" y="-4" width="5" height="8" rx="1.5" fill="#d9d9d9"/><circle r="6" fill="#fff"/><path d="M1 -4 A 4.5 4.5 0 0 1 1 4" stroke="#d4a017" stroke-width="3" fill="none"/></svg><b>Astronaut</b> where they really are · faded = behind a rock</span>
+      <span><svg width="44" height="22"><rect x="1" y="4" width="40" height="15" rx="7" fill="var(--trk)"/><text x="21" y="15.5" text-anchor="middle" font-size="11" font-weight="700" fill="#06101a">#12</text></svg><b>Name tag</b> = tracker says "that's #12"</span>
+      <span><svg width="30" height="22" viewBox="-15 -11 30 22"><ellipse rx="13" ry="9" fill="var(--trk)" fill-opacity=".18" stroke="var(--trk)" stroke-width="2" stroke-dasharray="4 3"/><text y="4" text-anchor="middle" font-size="11" font-weight="700" fill="var(--trk)">?</text></svg><b>Search area</b> = "lost sight, probably in here"</span>
+      <span><svg width="22" height="22" viewBox="-11 -11 22 22"><circle r="6" fill="none" stroke="#ffb454" stroke-width="2"/><path d="M-9 0h5M4 0h5M0 -9v5M0 4v5" stroke="#ffb454" stroke-width="2"/></svg><b>Camera ping</b> (grey tag = false alarm)</span>
+      <span><svg width="30" height="22"><path d="M15 21 L4 2 L26 2 Z" fill="#000" opacity=".7"/><path d="M10 9 l3-4 5 1 2 4-3 3-5 0z" fill="#6b6e76"/></svg><b>Blind zone</b> behind a boulder</span>
+      <span><b style="color:#4ade80">✔ same ID</b> / <b style="color:#ff6b6b">✘ new ID</b> when someone reappears</span>
+    </div>
+    <div id="analogy">Real-life version: like watching friends walk behind pillars in a mall. A good watcher remembers where each one was heading, so when someone steps out, they know who it is. The naive watcher forgets anyone they can't see, and greets them as a stranger.</div>
+    <div id="mapwrap"><canvas id="map"></canvas>
+      <div id="now"></div>
+    </div>
+    <div id="camwrap"><canvas id="cam"></canvas><div class="camcap">CAMERA VIEW (what the rover sees) · <i style="color:#ffb454">orange box</i> = detection · <i id="camTrk">coloured box</i> = tracked, dashed = believed hidden behind a rock</div></div>
   </div>
   <aside id="right">
     <section>
       <h3>Trackers <small>click to show on the map</small></h3>
       <div id="cards"></div>
-      <div class="legend2"><span><i style="background:#fff"></i>true position (training only)</span><span><i style="background:#ffb454"></i>detection</span><span><i style="background:#4cc9f0"></i>track + 95% ellipse</span></div>
       <label class="chk" style="margin-top:8px"><input type="checkbox" id="optTruth" checked> Show true positions</label>
     </section>
     <section class="log"><h3>What just happened</h3><div id="feed"></div></section>
     <section>
-      <h3>How to read the scores</h3>
-      <p class="hint"><b>ID kept</b>: of the people tracked before going behind cover for 1–5 s, the share that got the <i>same</i> ID back. <b>ID switches</b>: times a person's ID changed. <b>IDF1</b>: identity consistency over the whole run (1 = perfect). <b>MOTA</b>: overall detection accuracy (misses, false tracks, switches).</p>
+      <h3>Glossary</h3>
+      <details class="gloss" open><summary>Every word on this page, in plain English</summary>
+      <dl>
+        <dt>Detection</dt><dd>One "I see something here" from the camera in one frame. It has a position but no name. Some are false alarms (dust, glare).</dd>
+        <dt>Track / ID (#12)</dt><dd>The tracker's running record of one person over time, with a number. Keeping the <i>same</i> number for the same person is the whole job.</dd>
+        <dt>Occlusion</dt><dd>Something blocks the camera's view of a person, here a boulder. They still exist; the camera just can't see them.</dd>
+        <dt>Coasting / hidden track</dt><dd>While someone is hidden, the tracker keeps guessing where they are from how they were moving (the dashed shapes). The ellipse is how unsure it is: bigger = less sure.</dd>
+        <dt>ID kept / ID switch</dt><dd>When the person reappears, did they get their old number back (kept ✔) or a new one (switch ✘)? A new number means the system now thinks there are two different people.</dd>
+        <dt>ID kept through occlusion (big %)</dt><dd>Of people who were tracked, then hidden for 1–5 seconds, the share that got their old ID back. Higher is better.</dd>
+        <dt>IDF1</dt><dd>How consistently each real person carried one ID over the whole run (0 to 1, higher is better).</dd>
+        <dt>MOTA</dt><dd>Overall accuracy: penalises missed people, false tracks and ID switches together (up to 1, higher is better).</dd>
+        <dt>GOSPA</dt><dd>One error number in metres that combines position error, missed people and false tracks (lower is better).</dd>
+        <dt>Naive / Aware / Aware + neg. info</dt><dd>Three versions of the same tracker that differ only in how they treat hiding. See the cards above.</dd>
+      </dl></details>
     </section>
   </aside>
 </main>
