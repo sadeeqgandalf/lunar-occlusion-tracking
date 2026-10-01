@@ -7,6 +7,7 @@
 //  * Occlusion events: a target tracked before going behind cover for >= 1 s; success = same track ID within 2 s
 //    of reappearing. While hidden we also score whether the coasting track still exists and contains the truth.
 import { hungarian } from './hungarian.js';
+import { isHidden } from './occlusion.js';
 
 const TAU = 2.0, GOSPA_C = 2.0, MIN_OCC = 1.0, REACQ = 2.0, CHI2_95_2 = 5.991;
 
@@ -19,7 +20,7 @@ export class MotMetrics {
 
   update(world, tracker) {
     const T = world.t;
-    const vis = world.targets.filter((t) => t.vis.inFov && t.vis.visFrac >= 0.25);
+    const vis = world.targets.filter((t) => t.vis.inFov && !isHidden(t.vis));
     const rep = tracker.reported(), F = world.frame;
     this.f++; this.gtCount += vis.length; this.predCount += rep.length;
     const d = (g, k) => Math.hypot(g.x - k.x[0], g.y - k.x[1]);
@@ -52,7 +53,7 @@ export class MotMetrics {
 
     // --- occlusion events
     for (const g of world.targets) {
-      const hiddenNow = g.vis.inFov && g.vis.visFrac < 0.25, visibleNow = g.vis.inFov && !hiddenNow;
+      const hiddenNow = isHidden(g.vis), visibleNow = g.vis.inFov && !hiddenNow;
       let o = this.occ.get(g.id) || { state: 'idle' };
       if (o.state === 'idle' && hiddenNow && this.lastMatch.has(g.id) && o.lastVisibleMatched >= F - 5) o = { state: 'hidden', since: T, before: this.lastMatch.get(g.id) };
       else if (o.state === 'hidden') {

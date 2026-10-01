@@ -3,6 +3,7 @@
 import { MotSession } from '../mot/session.js';
 import { MOT_SCENARIOS } from '../mot/world.js';
 import { wrapAngle, TAU } from '../core/linalg.js';
+import { isHidden } from '../mot/occlusion.js';
 
 const $ = (id) => document.getElementById(id);
 const S = { scenario: 'boulders', seed: 7, speed: 2, paused: false, sel: 0, showTruth: true, view: '3d' };
@@ -32,8 +33,8 @@ function pushFeed(text, cls) { feed.unshift({ t: sess.world.t, text, cls }); if 
 function updateFeed() {
   const W = sess.world;
   for (const g of W.targets) {
-    const hid = g.vis.inFov && g.vis.visFrac < 0.25, was = prevHidden.get(g.id);
-    if (hid && was === false) pushFeed(`Crew ${g.id} went behind a boulder`, 'hide');
+    const hid = isHidden(g.vis), was = prevHidden.get(g.id);
+    if (hid && was === false) pushFeed(g.vis.visFrac >= 0.25 ? `Crew ${g.id} walked into deep shadow (in plain view, but too dark to detect)` : `Crew ${g.id} went behind a boulder`, 'hide');
     prevHidden.set(g.id, hid);
   }
   sess.runs.forEach((r, i) => {
@@ -80,8 +81,8 @@ function updateCards() {
   });
   $('feed').innerHTML = feed.map((f) => `<div class="${f.cls}"><b>${f.t.toFixed(0).padStart(4)}s</b> ${f.text}</div>`).join('');
   $('clock').textContent = `T+${sess.world.t.toFixed(1).padStart(5, '0')} s`;
-  const hiddenNow = sess.world.targets.filter((t) => t.vis.inFov && t.vis.visFrac < 0.25).length, col = COLORS[S.sel];
-  $('now').innerHTML = `Watching: <span class="sw" style="background:${col}"></span><b style="color:${col}">${sess.runs[S.sel].tracker.name}</b><br>${hiddenNow} of ${sess.world.targets.length} people hidden behind rocks right now`;
+  const hiddenNow = sess.world.targets.filter((t) => isHidden(t.vis)).length, col = COLORS[S.sel];
+  $('now').innerHTML = `Watching: <span class="sw" style="background:${col}"></span><b style="color:${col}">${sess.runs[S.sel].tracker.name}</b><br>${hiddenNow} of ${sess.world.targets.length} people hidden right now (behind rocks${sess.world.cfg.shadows ? ' or in shadow' : ''})`;
   document.documentElement.style.setProperty('--trk', col);
   document.querySelectorAll('#key .kname').forEach((el) => { el.style.color = col; });
   $('camTrk').style.color = col;
@@ -143,7 +144,7 @@ function drawMap() {
     c.beginPath();
     const p0 = P(cam.x + tl * Math.cos(cb - half), cam.y + tl * Math.sin(cb - half)), p1 = P(cam.x + tl * Math.cos(cb + half), cam.y + tl * Math.sin(cb + half));
     c.moveTo(...p0); c.arc(cx, cy, cam.range * 1.2 * s, -(cb - half), -(cb + half), true); c.lineTo(...p1); c.closePath();
-    c.fillStyle = 'rgba(5,6,10,0.72)'; c.fill();
+    c.fillStyle = b.h !== undefined && b.h < 2.2 ? 'rgba(5,6,10,0.32)' : 'rgba(5,6,10,0.72)'; c.fill(); // low rocks only hide legs
     if (!biggest || half > biggest.half) biggest = { half, cb, d };
   }
   if (biggest) { const rr = Math.min(cam.range - 4, biggest.d + 9), [lx, ly] = P(cam.x + rr * Math.cos(biggest.cb), cam.y + rr * Math.sin(biggest.cb)); c.fillStyle = '#9aa3b2'; c.font = 'italic 11px system-ui'; c.textAlign = 'center'; c.fillText('blind zone', lx, ly); c.fillText('(camera can\'t see here)', lx, ly + 13); c.textAlign = 'left'; }
@@ -157,10 +158,10 @@ function drawMap() {
   // true people
   const r = Math.max(7, 0.5 * s);
   if (S.showTruth) for (const t of w.targets) {
-    const [px, py] = P(t.x, t.y), hid = !t.vis.inFov || t.vis.visFrac < 0.25;
+    const [px, py] = P(t.x, t.y), hid = !t.vis.inFov || isHidden(t.vis);
     if (t.trail.length > 1) { c.strokeStyle = '#ffffff26'; c.lineWidth = 1.5; c.setLineDash([2, 4]); c.beginPath(); t.trail.forEach(([x, y], i) => { const q = P(x, y); i ? c.lineTo(...q) : c.moveTo(...q); }); c.stroke(); c.setLineDash([]); }
     drawAstronaut(c, px, py, r, t.h, hid ? 0.45 : 1);
-    c.fillStyle = hid ? '#ffffff99' : '#ffffffdd'; c.font = '11px system-ui'; c.fillText(hid ? `person ${t.id} · behind rock` : `person ${t.id}`, px - r, py + r + 13);
+    c.fillStyle = hid ? '#ffffff99' : '#ffffffdd'; c.font = '11px system-ui'; c.fillText(hid ? `person ${t.id} · ${t.vis.visFrac >= 0.25 ? 'in shadow' : 'behind rock'}` : `person ${t.id}`, px - r, py + r + 13);
   }
   // camera pings this frame (orange); in training view, false alarms are tagged
   sess.last.dets.forEach((d, i) => {

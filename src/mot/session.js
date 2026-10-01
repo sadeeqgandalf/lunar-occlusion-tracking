@@ -6,13 +6,13 @@ import { MotMetrics } from './metrics.js';
 export class MotSession {
   constructor({ scenario = 'boulders', seed = 7, overrides = {}, trackerParams = {} } = {}) {
     this.world = new MotWorld(scenario, seed, overrides);
-    const W = this.world, pd = W.cfg.pd, clutter = W.cfg.clutter;
+    const W = this.world, pd = W.cfg.pd, clutter = W.cfg.clutter, sun = W.cfg.shadows ? W.sun : null;
     // Ablation: identical trackers except for how they treat occlusion.
     this.runs = [
       { occlusionAware: true, negInfo: true },
       { occlusionAware: true, negInfo: false },
       { occlusionAware: false },
-    ].map((v) => ({ tracker: new Tracker(W.cam, W.boulders, { ...v, pd, clutter, ...trackerParams }), metrics: new MotMetrics() }));
+    ].map((v) => ({ tracker: new Tracker(W.cam, W.boulders, { ...v, pd, clutter, sun, ...trackerParams }), metrics: new MotMetrics() }));
     this.last = { dets: [], gt: [] };
   }
   step() {

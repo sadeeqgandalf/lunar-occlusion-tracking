@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from '../../vendor/three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from '../../vendor/three/examples/jsm/loaders/DRACOLoader.js';
 import { OrbitControls } from '../../vendor/three/examples/jsm/controls/OrbitControls.js';
+import { isHidden } from '../mot/occlusion.js';
 
 const MAST_H = 2.2, PERSON_H = 1.8;
 const toV = (x, y, h = 0) => new THREE.Vector3(x, h, -y);
@@ -100,6 +101,8 @@ export async function createWorld3D({ mainCanvas, mainOverlay, camCanvas, camOve
       if (!inFov && rng > r + 8) craters.push({ x, y, r, depth: r * 0.18 });
     }
     height = makeHeight(craters);
+    // light from the simulator's sun direction, so rendered shadows fall exactly where the experiment computes them
+    if (w.sun) { const K = 70; sun.position.set(K * Math.cos(w.sun.el) * Math.cos(w.sun.az), K * Math.sin(w.sun.el), -K * Math.cos(w.sun.el) * Math.sin(w.sun.az)); }
 
     // terrain
     const G = new THREE.PlaneGeometry(200, 160, 220, 176); G.rotateX(-Math.PI / 2);
@@ -113,8 +116,8 @@ export async function createWorld3D({ mainCanvas, mainOverlay, camCanvas, camOve
     const ground = new THREE.Mesh(G, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 }));
     ground.receiveShadow = true; staticGroup.add(ground);
 
-    // boulders: irregular rocks at the simulator's exact positions; taller than the mast line of sight
-    // (the simulator treats them as full occluders, so the 3-D view must agree)
+    // boulders: irregular rocks at the simulator's exact positions and heights (half-buried ellipsoids, as in the
+    // visibility model), so what the 3-D camera shows is what the experiment measures
     w.boulders.forEach((b, i) => {
       const geo = new THREE.IcosahedronGeometry(1, 4), p = geo.attributes.position;
       for (let k = 0; k < p.count; k++) {
@@ -123,8 +126,8 @@ export async function createWorld3D({ mainCanvas, mainOverlay, camCanvas, camOve
       }
       geo.computeVertexNormals();
       const rock = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x7c7f86, roughness: 0.95, flatShading: true }));
-      const hb = Math.max(2.6, b.r * 1.15);
-      rock.scale.set(b.r, hb * 0.62, b.r); rock.position.copy(toV(b.x, b.y, height(b.x, b.y) + hb * 0.38));
+      const hb = b.h ?? Math.max(2.6, b.r * 1.15);
+      rock.scale.set(b.r, hb, b.r); rock.position.copy(toV(b.x, b.y, height(b.x, b.y)));
       rock.rotation.y = hash(i, 3) * Math.PI * 2; rock.castShadow = rock.receiveShadow = true; staticGroup.add(rock);
     });
 
@@ -191,9 +194,9 @@ export async function createWorld3D({ mainCanvas, mainOverlay, camCanvas, camOve
       const g = people.get(t.id); if (!g) continue;
       g.position.copy(toV(t.x, t.y, height(t.x, t.y))); g.rotation.y = Math.atan2(Math.cos(t.h), -Math.sin(t.h));
       g.visible = true;
-      const hid = !t.vis.inFov || t.vis.visFrac < 0.25;
+      const hid = !t.vis.inFov || isHidden(t.vis);
       // the 3-D model IS the truth; only hidden people get a label, at their feet, so it never collides with the tracker's tag
-      if (showTruth && hid) labels1.push({ p: toV(t.x, t.y, height(t.x, t.y) - 0.2), text: `person ${t.id} · behind rock`, color: '#ffffff', bg: '#e8ecf2cc', font: '11px system-ui', alpha: 0.9 });
+      if (showTruth && hid) labels1.push({ p: toV(t.x, t.y, height(t.x, t.y) - 0.2), text: `person ${t.id} · ${t.vis.visFrac >= 0.25 ? 'in shadow' : 'behind rock'}`, color: '#ffffff', bg: '#e8ecf2cc', font: '11px system-ui', alpha: 0.9 });
     }
     // camera pings (orange discs on the ground)
     sess.last.dets.forEach((d) => {

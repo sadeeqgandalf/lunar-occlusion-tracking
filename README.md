@@ -23,27 +23,30 @@ Three trackers watch the **same** camera detections. They are identical (constan
 | tracker | what it believes when it gets no detection for a track |
 |---|---|
 | **Naive** | "Everyone is always visible": a few missed frames are evidence the person is gone. |
-| **Occlusion-aware** | Knows where the camera is blind (boulder map + field of view). A miss is only evidence of absence in proportion to the *expected* detection probability `P_D × visibility`, averaged over the track's uncertainty. A hidden track also declines detections it does not expect, so it is not hijacked by clutter or a passer-by. |
+| **Occlusion-aware** | Knows where the camera is blind (boulder map with heights, field of view, and the sun for cast shadows). A miss is only evidence of absence in proportion to the *expected* detection probability `P_D × visibility`, averaged over the track's uncertainty. A hidden track also declines detections it does not expect, so it is not hijacked by clutter or a passer-by. |
 | **Aware + negative information** | Also uses the miss itself: `p(x | missed) ∝ p(x) (1 − P_D(x))`. Positions in plain view are down-weighted, so the hidden estimate moves *into* the shadow instead of drifting out of it. |
 
-### Results (boulder field, 20 seeds × 300 s, identical detections)
+### Results (20 seeds × 300 s per scenario, identical detections, 3-D visibility)
 
-| tracker | ID kept through 1–5 s occlusions | ID kept through ≥ 5 s occlusions | ID switches / run | MOTA |
+| scenario | tracker | ID kept through 1–5 s occlusions | ID switches / run | MOTA |
 |---|---|---|---|---|
-| Aware + negative info | **30%** [24–37] | 2% [1–3] | 47.8 ± 5.6 | 0.83 ± 0.02 |
-| Occlusion-aware | **28%** [22–34] | 2% [1–3] | 51.6 ± 5.6 | 0.87 ± 0.02 |
-| Naive | **0%** [0–2] | 0% [0–1] | 58.6 ± 6.9 | 0.93 ± 0.01 |
+| Boulder field | Aware + negative info | **46%** [40–52] | 47.8 ± 5.3 | 0.90 ± 0.02 |
+| | Occlusion-aware | **36%** [31–42] | 54.0 ± 5.3 | 0.93 ± 0.02 |
+| | Naive | **0%** [0–1] | 75.6 ± 9.1 | 0.94 ± 0.01 |
+| South pole · long shadows | Aware + negative info | **45%** [40–51] | 51.3 ± 5.4 | 0.84 ± 0.02 |
+| | Occlusion-aware | **36%** [31–42] | 60.7 ± 5.7 | 0.86 ± 0.02 |
+| | Naive | **0%** [0–2] | 129.4 ± 13.0 | 0.80 ± 0.02 |
 
-Brackets are Wilson 95% intervals; ± is 1.96 × standard error over seeds. All three scenarios, plus IDF1 and GOSPA, are in [`experiments/results.md`](experiments/results.md), which the script above regenerates and stamps with the git commit.
+Brackets are Wilson 95% intervals; ± is 1.96 × standard error over seeds. All four scenarios, plus IDF1, GOSPA and occlusions of 5 s or more, are in [`experiments/results.md`](experiments/results.md). The script above regenerates them and stamps them with the git commit.
 
 **What the data says**
-* **Occlusion modelling is what lets a tracker survive short occlusions at all**: 0% → ~30% of identities kept, and ~18% fewer ID switches.
-* **It has a cost**: MOTA drops ~6–10 points, because tracks kept alive through occlusion also keep some false tracks alive longer. That trade-off is real and is reported, not hidden.
-* **Long occlusions (≥ 5 s) defeat motion-only tracking** (≤ 6% kept for every variant in every scene). People change direction while unseen, and no motion model recovers that. This is the quantitative case for **appearance re-identification** (see roadmap).
-* **Negative information helps a little**: most in the sparse-cover scene (47% [36–59] vs 30% [21–41], intervals overlap slightly) and marginally elsewhere. Not yet a statistically clear win, and reported as such.
+* **Occlusion modelling is what lets a tracker survive occlusions at all.** Retention through short occlusions goes from 0% to roughly a third to a half (32–63% across the four scenes), and ID switches drop by 37% (boulder field) to 60% (polar shadows).
+* **Under realistic lunar lighting it is not a trade-off.** In the polar scene the naive tracker loses people in long cast shadows as well as behind rocks. It switches IDs 2.5× more often and also has the *worst* MOTA. In the boulder field the aware trackers give up 1–4 MOTA points (some tracks are kept alive longer), which is reported, not hidden.
+* **Negative information is consistently better than plain awareness**: 46 vs 36%, 45 vs 36%, 33 vs 32% and 63 vs 40% across the four scenes. Each interval overlaps slightly, so the claim is "consistently better", not "proven better".
+* **Long occlusions (≥ 5 s) still defeat motion-only tracking** (≤ 12% kept for every variant in every scene). People change direction while unseen, and no motion model recovers that. This is the quantitative case for **appearance re-identification** (see roadmap).
 
 ### How it is built (and how it was debugged)
-* **Occlusion geometry** (`src/mot/occlusion.js`): angular line-of-sight occlusion of a target disk by closer boulder disks, giving a visible fraction, `P_D(visibility)`, and the centroid shift a real detector shows under partial occlusion.
+* **Occlusion physics** (`src/mot/occlusion.js`): 3-D line of sight from a 2.2 m mast camera to 16 points on each 1.8 m person (4 heights × 4 widths) against half-buried ellipsoid boulders. Low rocks hide legs but not heads; tall rocks hide everything. Cast shadows under a low polar sun (rays from the body toward the sun) reduce detectability even in plain view. From these come the visible fraction, `P_D`, and the centroid shift a real detector shows under partial occlusion. The 3-D view uses the same boulder heights and sun direction, so what you see is what is measured.
 * **Sensor** (`src/mot/world.js`): stereo-like range/bearing detections with range-dependent noise, Poisson clutter, missed detections. Identities are never passed to the trackers (a test enforces this).
 * **Tracker** (`src/mot/tracker.js`): per-track CV EKF; assignment by Hungarian algorithm over costs `−log(P_D g / κ)` with an explicit "missed" option `−log(1 − P_D P_G)`; Bernoulli-filter existence update; the three variants above.
 * **Metrics** (`src/mot/metrics.js`): CLEAR-MOT (MOTA, MOTP, ID switches), IDF1, GOSPA, and occlusion events binned by duration, plus survival and 95% coverage of hidden tracks.
@@ -75,7 +78,7 @@ Modelling the disturbances as states (wheel slip, wind, accelerometer bias) fixe
 **Language choice, measured.** The rover EKF was ported to C++17 and Python/numpy and replayed on one recorded trace (`bench/xlang/`). All three agree to ~4e-10. Per step: C++ ≈ 0.1 µs (0.08–0.13 across runs), JS ≈ 2.5 µs, numpy ≈ 9 µs. Caveats: single trace, single machine, rover model only. At this state size all three are far inside a 20 Hz budget, so the choice follows the job: browser JS for this interactive lab, C++ for embedded/flight-style code, Python for offline analysis.
 
 ## Roadmap
-1. **3-D visibility in the experiment itself.** Compute visibility from the rendered depth/ID buffer, so a person behind a low rock is partially visible over it, and add south-pole shadows as a second kind of occlusion (people walking into darkness). The ID masks double as segmentation (MOTS).
+1. **Detections from rendered images.** Replace the sensor model with a detector running on the rendered camera images, and use the depth/ID buffer masks as segmentation ground truth (MOTS).
 2. **Synthetic MOTS dataset with PyTorch3D.** Render the same scenes offline (images, per-person masks, depth, IDs) to train and evaluate SAM-style trackers.
 3. **Appearance re-identification** for long occlusions, linking to SAM-based MOTS work in a separate repository.
 4. **Python reference implementation** and evaluation on real occlusion-labelled data (MOT17 / KITTI tracking) with HOTA via TrackEval.
@@ -87,7 +90,7 @@ Modelling the disturbances as states (wheel slip, wind, accelerometer bias) fixe
 
 ## Limitations (so you can trust the rest)
 * **Simulator, not NASA software.** This is an independent portfolio project. It is not affiliated with or endorsed by NASA, and nothing here is flight-qualified.
-* **Occlusion is computed in the ground plane.** The 3-D view is rendered with real depth, but the tracking experiment's visibility model is planar, so boulders are drawn taller than the camera mast to keep the two consistent. True 3-D visibility (seeing over low rocks) is roadmap item 1. Walkers are simulated, and detections come from a sensor model rather than a neural detector.
+* **Simplified world.** The experiment assumes locally flat ground (the 3-D view adds gentle regolith relief, and keeps scenery craters outside the camera's view). Shadow darkness is a fixed detectability penalty, not a photometric camera model. Walkers are simulated, and detections come from a sensor model rather than a neural detector.
 * **The navigation lab's dynamics are time-compressed** (rover ~1 m/s, spacecraft mean motion ~9× real LEO), and its sensor noise values are plausible, not characterised from hardware.
 * **No ROS 2 node has been built.** ROS isn't installed on the development machine.
 * **UI testing:** UIs are tested by a stub-DOM test (every code path) and were inspected in a headless Chromium at several window sizes and pixel ratios. They have not been tested on mobile.

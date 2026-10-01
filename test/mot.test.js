@@ -60,3 +60,33 @@ test('headline: occlusion-aware trackers keep IDs through short occlusions; the 
   assert.ok(f('Aware + neg. info') >= 0.15, `aware+NI short-occlusion retention ${f('Aware + neg. info')}`);
   assert.ok(tot['Aware + neg. info'].idsw < tot['Naive'].idsw, 'fewer ID switches than naive');
 });
+
+test('3-D visibility: a low rock hides legs but not the head; a tall rock hides everything', () => {
+  const cam = { x: 0, y: 0, th: Math.PI / 2, fov: Math.PI / 2, range: 50 };
+  const low = visibility(cam, [{ x: 0, y: 10, r: 2, h: 0.9 }], 0, 14, 0.4);
+  assert.ok(low.visFrac > 0.25 && low.visFrac < 1, `low rock: partly visible, got ${low.visFrac}`);
+  assert.equal(visibility(cam, [{ x: 0, y: 10, r: 2, h: 3.2 }], 0, 14, 0.4).visFrac, 0, 'tall rock: fully hidden');
+  assert.equal(visibility(cam, [{ x: 0, y: 10, r: 2, h: 3.2 }], 0, 5, 0.4).visFrac, 1, 'in front of the rock: fully visible');
+});
+
+test('3-D visibility: a boulder without a height behaves like the old planar full occluder', () => {
+  const cam = { x: 0, y: 0, th: Math.PI / 2, fov: Math.PI / 2, range: 50 };
+  assert.equal(visibility(cam, [{ x: 0, y: 10, r: 2 }], 0, 20, 0.4).visFrac, 0);
+});
+
+test('shadows: a person down-sun of a tall rock is in shadow; in the open, or up-sun of it, they are not', async () => {
+  const { shadowFraction } = await import('../src/mot/occlusion.js');
+  const sun = { az: 0, el: (8 * Math.PI) / 180 };                // sun low in the +x direction
+  const rock = [{ x: 10, y: 0, r: 2, h: 3 }];
+  assert.ok(shadowFraction(rock, 4, 0, sun) > 0.5, 'behind the rock relative to the sun');
+  assert.equal(shadowFraction(rock, 16, 0, sun), 0, 'on the sunny side');
+  assert.equal(shadowFraction(rock, 4, 8, sun), 0, 'off to the side');
+  assert.equal(shadowFraction([], 4, 0, sun), 0, 'no rocks');
+});
+
+test('polar scenario: people actually vanish into shadow while still in line of sight', () => {
+  const s = new MotSession({ scenario: 'polar', seed: 3 });
+  let shadowHidden = 0;
+  for (let i = 0; i < 1500; i++) { s.step(); for (const t of s.world.targets) if (t.vis.inFov && t.vis.visFrac >= 0.25 && t.vis.pd < 0.15) shadowHidden++; }
+  assert.ok(shadowHidden > 0, 'expected some shadow-only occlusion in 150 s');
+});

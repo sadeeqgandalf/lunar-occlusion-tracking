@@ -17,7 +17,7 @@
 // So a miss on a track predicted to be hidden carries (almost) no evidence that the object is gone.
 import { Mat, wrapAngle } from '../core/linalg.js';
 import { hungarian } from './hungarian.js';
-import { visibility, detectionProb } from './occlusion.js';
+import { visibility, detectionProb, shadowFraction } from './occlusion.js';
 import { sigRange } from './world.js';
 import { RNG } from '../core/rng.js';
 
@@ -38,8 +38,8 @@ export const TRACKER_DEFAULTS = {
 };
 
 export class Tracker {
-  constructor(cam, boulders, { occlusionAware = true, negInfo = false, name, ...params } = {}) {
-    this.cam = cam; this.boulders = boulders; this.aware = occlusionAware; this.negInfo = occlusionAware && negInfo;
+  constructor(cam, boulders, { occlusionAware = true, negInfo = false, name, sun = null, ...params } = {}) {
+    this.cam = cam; this.boulders = boulders; this.sun = sun; this.aware = occlusionAware; this.negInfo = occlusionAware && negInfo;
     this.name = name || (this.negInfo ? 'Aware + neg. info' : occlusionAware ? 'Occlusion-aware' : 'Naive');
     this.p = { ...TRACKER_DEFAULTS, ...params };
     this.tracks = []; this.nextId = 1; this.dt = 0.1;
@@ -52,7 +52,7 @@ export class Tracker {
       const x = t.x.slice();
       for (let r = 0; r < 4; r++) for (let c = 0; c <= r; c++) x[r] += L.get(r, c) * z[c];
       const v = visibility(this.cam, this.boulders, x[0], x[1], this.cam.targetR);
-      pts.push({ x, pd: detectionProb(v.inFov, v.visFrac, this.p.pd) });
+      pts.push({ x, pd: detectionProb(v.inFov, v.visFrac, this.p.pd, this.sun ? shadowFraction(this.boulders, x[0], x[1], this.sun) : 0) });
     }
     return pts;
   }
