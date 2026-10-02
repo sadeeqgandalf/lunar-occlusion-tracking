@@ -1,4 +1,9 @@
-# MATLAB: RPO docking with an EKF
+# MATLAB
+
+* [`lunar/`](lunar/README.md) — **Lunar Occlusion Tracking Lab**: 3-D scene, rover camera view, our three trackers plus MathWorks `trackerGNN`, verified to reproduce the web lab exactly.
+* `docking_sim.m` — RPO docking with an EKF (below).
+
+## RPO docking with an EKF
 
 `docking_sim.m` is a MATLAB port of the web lab's spacecraft scenario (RPO 1 · Docking Approach): same
 Clohessy-Wiltshire dynamics, sensors, noise levels, EKF tuning and guidance, so results can be compared side by side.
