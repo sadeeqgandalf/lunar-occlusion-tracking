@@ -165,7 +165,7 @@ out = struct('t', H.t, 'truth', H.x, 'estimate', H.xh, 'P', H.P, 'nees', H.nees,
     'inside3sigma', mean(err <= sig3));
 
 fprintf('\n%s\n', strjoin(evlog, newline));
-fprintf(['\nDocked: %s after %.1f s  |  position RMSE %.2f m  |  ANEES %.2f (consistent near 4)  |' ...
+fprintf(['\nDocked: %s after %.1f s  |  position RMSE %.2f m  |  ANEES %.2f (4 = honest, lower = cautious, higher = overconfident)  |' ...
     '  error inside 3-sigma %.0f%% of the time\n'], passfail(docked), H.t(end), out.rmse, out.anees, 100*out.inside3sigma);
 
 if opts.Animate || opts.Video ~= ""
