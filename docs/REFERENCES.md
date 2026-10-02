@@ -39,6 +39,19 @@ Every method in this repository traces to the literature below. Entries marked �
 | G6 ✓ | Smithsonian National Air and Space Museum. **Cernan's spacesuit, Apollo 17** (object record). [link](https://airandspace.si.edu/exhibition/outside-spacecraft/image-details/5263.html) | Real identity markings: red commander stripes were added to EVA suits from Apollo 13 so TV cameras could tell the moonwalkers apart. This is the basis of our suit-stripe colour code for *true* identity (`src/ui/idcolor.js`). |
 | G5 | W. H. Clohessy, R. S. Wiltshire. **Terminal guidance system for satellite rendezvous.** *Journal of the Aerospace Sciences* 27(9):653–658, 1960. | Relative-motion model of the docking scenario (`src/models/spacecraft.js`). |
 
+## PyTorch3D lab: rendering, re-identification, PHD density (`pytorch3d/`)
+
+Not yet individually verified against the publisher (no ✓); details as commonly cited.
+
+| # | Reference | Used for (code) |
+|---|---|---|
+| P1 | N. Ravi, J. Reizenstein, D. Novotny, T. Gordon, W.-Y. Lo, J. Johnson, G. Gkioxari. **Accelerating 3D deep learning with PyTorch3D.** arXiv:2007.08501, 2020. | Mesh rasterisation, depth and per-pixel face ids for the camera views (`lunar3d/render.py`). |
+| P2 | X. Ma, V. Hegde, L. Yolyan. **3D Deep Learning with Python.** Packt, 2022 (code: the user's fork of PacktPublishing/3D-Deep-Learning-with-Python). | Rendering pipeline pattern, ch. 2 (`render.py`). |
+| P3 | N. Wojke, A. Bewley, D. Paulus. **Simple online and realtime tracking with a deep association metric (DeepSORT).** ICIP 2017. | Appearance-assisted association and re-identification of lost tracks (`tracker.py`, `reid`). Our signature is a colour histogram, not a learned embedding. |
+| P4 | R. Mahler. **Multitarget Bayes filtering via first-order multitarget moments.** IEEE Trans. Aerospace and Electronic Systems 39(4), 2003. | The PHD (intensity) filter (`phd.py`). |
+| P5 | B.-N. Vo, S. Singh, A. Doucet. **Sequential Monte Carlo methods for multitarget filtering with random finite sets.** IEEE Trans. Aerospace and Electronic Systems 41(4), 2005. | Particle implementation of the PHD filter (`phd.py`). |
+| P6 | B. Ristic, D. Clark, B.-N. Vo, B.-T. Vo. **Adaptive target birth intensity for PHD and CPHD filters.** IEEE Trans. Aerospace and Electronic Systems 48(2), 2012. | Measurement-driven birth, so no phantom mass accumulates behind rocks (`phd.py`). |
+
 ## How this project relates to the literature (honest positioning)
 
 * **What is standard:** CV-EKF tracks, χ² gating, Hungarian assignment (R5, R8, R9); Bernoulli/IPDA existence (R1, R2); CLEAR-MOT, IDF1, GOSPA scoring (E1–E3).

@@ -1,0 +1,5 @@
+.venv/
+*.mp4
+build.log
+__pycache__/
+experiments/logs/
