@@ -25,10 +25,12 @@ export function idColorA(n, a) {
   const h = idColor(n), v = parseInt(h.slice(1), 16);
   return `rgba(${(v >> 16) & 255}, ${(v >> 8) & 255}, ${v & 255}, ${a})`;
 }
+// stripe colours: hues spread round the colour wheel and kept away from the gold visor, so a camera can tell people
+// apart by colour (measured with PyTorch3D renders: same person 0.99 similarity, different people ~0.1)
 export const STRIPES = [
-  { name: 'red', hex: '#e5322d' }, { name: 'gold', hex: '#f2c12e' }, { name: 'blue', hex: '#2f6fe0' }, { name: 'green', hex: '#2fb34a' },
-  { name: 'orange', hex: '#f07a1a' }, { name: 'violet', hex: '#8e4fd6' }, { name: 'cyan', hex: '#1fb5c9' }, { name: 'pink', hex: '#e64fa3' },
-  { name: 'lime', hex: '#9ccc2b' }, { name: 'brown', hex: '#8a5a32' },
+  { name: 'red', hex: '#e52929' }, { name: 'blue', hex: '#2966eb' }, { name: 'green', hex: '#29b847' }, { name: 'magenta', hex: '#e033b8' },
+  { name: 'cyan', hex: '#1fbdcc' }, { name: 'violet', hex: '#8542e0' }, { name: 'lime', hex: '#99db24' }, { name: 'pink', hex: '#f2739e' },
+  { name: 'indigo', hex: '#4d4da6' }, { name: 'maroon', hex: '#b31f4d' },
 ];
 export const stripeOf = (personId) => STRIPES[(personId - 1) % STRIPES.length];
 export const personName = (personId) => `P${personId}`;

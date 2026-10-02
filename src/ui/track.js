@@ -10,20 +10,21 @@ import { idColor, idColorA, stripeOf, label, labelConfirmed, personName } from '
 
 const $ = (id) => document.getElementById(id);
 // default seed 8: a typical run (same ranking as the 20-seed average), not the best one (15) or the worst (7, 9, 16)
-const S = { scenario: 'boulders', seed: 8, speed: 2, paused: false, sel: 0, showTruth: true, view: '3d', overrides: {}, sw: [] };
+const S = { scenario: 'boulders', seed: 8, speed: 2, paused: false, sel: 3, showTruth: true, view: '3d', overrides: {}, sw: [] };
 let w3d = null, w3dLost = null; // w3dLost: a 3-D view waiting for the browser to restore its GPU context
-const COLORS = ['#4ade80', '#4cc9f0', '#ff6b6b'];
+const COLORS = ['#4ade80', '#4cc9f0', '#ff6b6b', '#bd8cff'];
 const PLAIN = {
   'Aware + neg. info': 'Waits, and searches only the blind spot.',
   'Occlusion-aware': 'Knows the blind spots, so it waits.',
   Naive: 'Forgets anyone it cannot see.',
+  'Aware + neg. info + re-ID': 'Also recognises people by their suit stripes, even after long hides.',
 };
-let sess, feed = [], pending = new Map(), seenEv = [], prevHidden = new Map(), marks = [], prevMatch = [], idHist = [];
+let sess, feed = [], pending = new Map(), seenEv = [], seenReid = [], prevHidden = new Map(), marks = [], prevMatch = [], idHist = [];
 
 function newSession() {
   sess = new MotSession({ scenario: S.scenario, seed: S.seed, overrides: S.overrides });
   S.sw = sess.runs.map(() => []);
-  feed = []; pending = new Map(); seenEv = sess.runs.map(() => 0); prevHidden = new Map(); marks = []; prevMatch = sess.runs.map(() => new Map()); idHist = sess.runs.map(() => new Map());
+  feed = []; pending = new Map(); seenEv = sess.runs.map(() => 0); seenReid = sess.runs.map(() => 0); prevHidden = new Map(); marks = []; prevMatch = sess.runs.map(() => new Map()); idHist = sess.runs.map(() => new Map());
   pushFeed(MOT_SCENARIOS[S.scenario].label, '');
   buildCards();
 }
@@ -45,6 +46,17 @@ function updateFeed() {
       if (i === S.sel && before !== undefined && before !== kid) pushFeed(`${pChip(gid)} ${idChip(label(T, before))} → ${idChip(n)} ID switch <span style="color:${COLORS[i]}">${short(T.name)}</span>`, 'bad');
       pm.set(gid, kid);
       const h = hist.get(gid) || []; if (h[h.length - 1] !== n) { h.push(n); hist.set(gid, h); }
+    }
+  });
+  // re-identification: a lost person recognised by their suit stripes (announced when the gap was a real hide, >= 1 s)
+  sess.runs.forEach((r, i) => {
+    const T = r.tracker, evs = T.reidEvents || [];
+    for (; seenReid[i] < evs.length; seenReid[i]++) {
+      const e = evs[seenReid[i]];
+      if (e.gap < 1) continue;
+      const tr = T.tracks.find((q) => q.id === e.id);
+      if (tr && e.gap >= 2) marks.push({ run: i, x: tr.x[0], y: tr.x[1], t: W.t - 2, kept: true, reid: true }); // shown ~2 s
+      if (i === S.sel) pushFeed(`${idChip(label(T, e.id))} recognised again after ${e.gap.toFixed(0)} s <span style="color:var(--dim)">(match ${e.sim.toFixed(2)})</span>`, 'ok');
     }
   });
   for (const g of W.targets) {
@@ -71,20 +83,21 @@ function updateFeed() {
     pending.delete(key);
   }
 }
-const short = (n) => ({ 'Aware + neg. info': 'Aware+NI', 'Occlusion-aware': 'Aware', Naive: 'Naive' }[n] || n);
+const short = (n) => ({ 'Aware + neg. info': 'Aware+NI', 'Occlusion-aware': 'Aware', Naive: 'Naive', 'Aware + neg. info + re-ID': 'Re-ID' }[n] || n);
 
 // ------------------------------------------------------------------ scoreboard
 function buildCards() {
   $('cards').innerHTML = sess.runs.map((r, i) => `<div class="tcard ${i === S.sel ? 'sel' : ''}" data-i="${i}">
     <div class="nm" style="color:${COLORS[i]}">${i === S.sel ? '◉ ' : ''}${r.tracker.name}</div>
     <div class="plain">${PLAIN[r.tracker.name] || ''}</div>
-    <div class="nums"><div><b id="kept${i}" style="color:${COLORS[i]}">–</b><span>came back with same ID</span></div><div><b id="idsw${i}">–</b><span>ID switches</span></div></div>
+    <div class="nums"><div><b id="kept${i}" style="color:${COLORS[i]}">–</b><span>same ID after short hide</span></div><div><b id="long${i}" style="color:${COLORS[i]}">–</b><span>after long hide (&gt;5 s)</span></div><div><b id="idsw${i}">–</b><span>ID switches</span></div></div>
   </div>`).join('');
 }
 function updateCards() {
   sess.runs.forEach((r, i) => {
-    const s = r.metrics.summary(), ev = r.metrics.events, k = ev.filter((e) => e.kept).length, n = ev.length; // every hide ≥ 1 s = every "back" line in the feed
-    $('kept' + i).textContent = `${k} / ${n}`; // counts, not %: a few events in one run make percentages misleading
+    const s = r.metrics.summary(), b = s.occByDuration;   // counts, not %: a few events in one run make percentages misleading
+    $('kept' + i).textContent = `${b[0].kept + b[1].kept} / ${b[0].n + b[1].n}`;   // hides of 1-5 s
+    $('long' + i).textContent = `${b[2].kept + b[3].kept} / ${b[2].n + b[3].n}`;   // hides longer than 5 s
     $('idsw' + i).textContent = s.idsw;
   });
   // people: each real person, the ID the shown tracker gives them now, and every ID they have had
@@ -211,7 +224,7 @@ function drawMap() {
   for (const m of marks) {
     if (m.run !== S.sel) continue;
     const [px, py] = P(m.x, m.y), al = Math.max(1 - (w.t - m.t) / 4, 0.2);
-    c.globalAlpha = al; c.font = 'bold 13px system-ui'; const txt = m.kept ? '✔ same ID' : '✘ new ID', tw = c.measureText(txt).width + 14;
+    c.globalAlpha = al; c.font = 'bold 13px system-ui'; const txt = m.reid ? 're-ID ✔' : m.kept ? '✔ same ID' : '✘ new ID', tw = c.measureText(txt).width + 14;
     c.fillStyle = m.kept ? '#14532d' : '#4c1219'; c.beginPath(); c.roundRect(px - tw / 2, py - r - 36, tw, 22, 11); c.fill();
     c.fillStyle = m.kept ? '#4ade80' : '#ff8a8a'; c.textAlign = 'center'; c.fillText(txt, px, py - r - 20); c.textAlign = 'left'; c.globalAlpha = 1;
   }
@@ -373,7 +386,7 @@ const TRACK_TOUR = (api) => [
   { at: '#goal', title: '1 · The question', text: 'People are <b>P1–P5</b> (suit stripe colour). The tracker names them <b>#11, #12…</b> When P3 walks behind a rock, does P3 come back with the same number? A new number is an <b>ID switch</b>.' },
   { at: '#mapwrap', title: '2 · The world', text: 'Real NASA models. Coloured <b>rings and #tags</b> are what the tracker believes. A dashed <b>#11?</b> with a shaded area means "hidden, probably in here". Drag to orbit.' },
   { at: '#camwrap', title: '3 · What the rover camera sees', text: 'The mask colour on each person is the tracker\'s ID. Same stripe, new mask colour = ID switch.' },
-  { at: '#cards', title: '4 · Three trackers', text: 'Same camera data, different handling of a missed detection. <b>Came back with same ID</b>: e.g. 3 / 4 means 3 of 4 people who hid came back with their old number; higher is better. <b>ID switches</b>: lower is better.', action: { label: 'Show the naive tracker', run: () => api.showNaive() } },
+  { at: '#cards', title: '4 · Four trackers', text: 'Same camera data. The first three differ only in how they treat a missed detection; <b>Re-ID</b> also recognises people by their suit-stripe colours. <b>Same ID after short / long hide</b>: e.g. 3 / 4 means 3 of 4 people who hid came back with their old number; higher is better. <b>ID switches</b>: lower is better.', action: { label: 'Show the naive tracker', run: () => api.showNaive() } },
   { at: '#who', title: '5 · People', text: 'One row per real person. <b>Now</b>: their ID, <b>#11?</b> if hidden but still remembered, <b>lost</b> if the tracker gave up. <b>IDs so far</b> lists every number the tracker gave them. One number = never lost. Each extra number is one ID switch (✘).' },
   { at: '#feed', title: '6 · What happened', text: '"P3 behind rock", then "P3 back (4 s)" with ✔ (same ID) or ✘ (new ID) for each tracker: <b>NI</b> = Aware + neg. info, then Aware, then Naive, in their card colours.' },
   { at: '#scenario', title: '7 · Shadows', text: 'At the lunar south pole the sun is low and shadows are long. People in shadow are in view but too dark to detect.', action: { label: '🌑 Switch to South pole', run: () => api.polar() } },

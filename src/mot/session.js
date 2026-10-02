@@ -7,11 +7,12 @@ export class MotSession {
   constructor({ scenario = 'boulders', seed = 7, overrides = {}, trackerParams = {} } = {}) {
     this.world = new MotWorld(scenario, seed, overrides);
     const W = this.world, pd = W.cfg.pd, clutter = W.cfg.clutter, sun = W.cfg.shadows ? W.sun : null;
-    // Ablation: identical trackers except for how they treat occlusion.
+    // Ablation: identical trackers except for how they treat occlusion; the 4th also recognises people by appearance.
     this.runs = [
       { occlusionAware: true, negInfo: true },
       { occlusionAware: true, negInfo: false },
       { occlusionAware: false },
+      { occlusionAware: true, negInfo: true, reid: true },
     ].map((v) => ({ tracker: new Tracker(W.cam, W.boulders, { ...v, pd, clutter, sun, ...trackerParams }), metrics: new MotMetrics() }));
     this.last = { dets: [], gt: [] };
   }
@@ -21,7 +22,8 @@ export class MotSession {
     const { dets, gt } = W.sense();
     this.last = { dets, gt };
     for (const r of this.runs) {
-      r.tracker.step(dets.map((d) => ({ range: d.range, bearing: d.bearing }))); // tracker never sees identities
+      // trackers never see identities; only the re-ID tracker gets each detection's colour signature
+      r.tracker.step(dets.map((d) => (r.tracker.reid ? { range: d.range, bearing: d.bearing, feat: d.feat } : { range: d.range, bearing: d.bearing })));
       r.metrics.update(W, r.tracker);
     }
   }

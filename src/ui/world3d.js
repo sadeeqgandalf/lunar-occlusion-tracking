@@ -172,7 +172,7 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
         labels1.push({ p: toV(x, y, gh + PERSON_H + 1.05), text: `#${n}`, color: ic }); // camera view: box + tag drawn per person below
       }
     }
-    for (const mk of marks) labels1.push({ p: toV(mk.x, mk.y, height(mk.x, mk.y) + PERSON_H + 1.9), text: mk.kept ? '✔ same ID' : '✘ new ID', color: mk.kept ? '#4ade80' : '#ff8a8a', bg: mk.kept ? '#14532d' : '#4c1219', fg: mk.kept ? '#4ade80' : '#ff8a8a', font: 'bold 13px system-ui', alpha: mk.alpha });
+    for (const mk of marks) labels1.push({ p: toV(mk.x, mk.y, height(mk.x, mk.y) + PERSON_H + 1.9), text: mk.reid ? 're-ID ✔' : mk.kept ? '✔ same ID' : '✘ new ID', color: mk.kept ? '#4ade80' : '#ff8a8a', bg: mk.kept ? '#14532d' : '#4c1219', fg: mk.kept ? '#4ade80' : '#ff8a8a', font: 'bold 13px system-ui', alpha: mk.alpha });
 
     // rover camera: at the mast head, looking along the simulated optical axis, same horizontal field of view
     const cam = w.cam, eye = toV(cam.x, cam.y, height(cam.x, cam.y) + MAST_H);

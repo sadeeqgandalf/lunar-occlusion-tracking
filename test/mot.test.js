@@ -98,3 +98,37 @@ test('hidden-cause wording: shadow only when shadow is measured, never in shadow
   const s = new MotSession({ scenario: 'boulders', seed: 4 });
   for (let i = 0; i < 800; i++) { s.step(); for (const t of s.world.targets) assert.notEqual(hiddenCause(t.vis), 'shadow'); }
 });
+
+// ---------------------------------------------------------------- re-identification
+import { personSignature, clutterSignature, cosine } from '../src/mot/appearance.js';
+import { RNG as RNG2 } from '../src/core/rng.js';
+
+test('appearance signatures: same person similar, different people and rocks not', () => {
+  const r = new RNG2(3);
+  const a = personSignature(1, 0.9, 0, r), b = personSignature(1, 0.4, 0, r), c = personSignature(2, 0.9, 0, r), d = clutterSignature(r);
+  assert.ok(cosine(a, b) > 0.86, `same person ${cosine(a, b)}`);
+  assert.ok(cosine(a, c) < 0.5, `different people ${cosine(a, c)}`);
+  assert.ok(cosine(a, d) < 0.5, `person vs rock ${cosine(a, d)}`);
+});
+
+test('re-ID tracker keeps more identities through long hides and switches IDs less (polar, 300 s)', async () => {
+  const { MotSession } = await import('../src/mot/session.js');
+  const s = new MotSession({ scenario: 'polar', seed: 3 }).run(300);
+  const [ni, , , re] = s.summaries();
+  const long = (x) => x.occByDuration[2].kept + x.occByDuration[3].kept;
+  assert.ok(re.idsw < ni.idsw, `ID switches re-ID ${re.idsw} vs ${ni.idsw}`);
+  assert.ok(long(re) > long(ni), `long hides kept re-ID ${long(re)} vs ${long(ni)}`);
+  assert.ok(re.idf1 > ni.idf1, `IDF1 re-ID ${re.idf1} vs ${ni.idf1}`);
+});
+
+test('re-ID never changes the other three trackers (appearance has its own random stream)', async () => {
+  const { MotSession } = await import('../src/mot/session.js');
+  const a = new MotSession({ scenario: 'boulders', seed: 5 }).run(60).summaries();
+  const { MotWorld } = await import('../src/mot/world.js');
+  const { Tracker } = await import('../src/mot/tracker.js');
+  const { MotMetrics } = await import('../src/mot/metrics.js');
+  const W = new MotWorld('boulders', 5), T = new Tracker(W.cam, W.boulders, { occlusionAware: true, negInfo: true, pd: W.cfg.pd, clutter: W.cfg.clutter }), M = new MotMetrics();
+  for (let i = 0; i < 600; i++) { W.step(); const { dets } = W.sense(); T.step(dets.map((d) => ({ range: d.range, bearing: d.bearing }))); M.update(W, T); }
+  assert.equal(M.summary().idsw, a[0].idsw);
+  assert.equal(M.summary().idf1, a[0].idf1);
+});

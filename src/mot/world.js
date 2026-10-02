@@ -2,6 +2,7 @@
 import { RNG } from '../core/rng.js';
 import { clamp, wrapAngle } from '../core/linalg.js';
 import { visibility, detectionProb, shadowFraction } from './occlusion.js';
+import { personSignature, clutterSignature } from './appearance.js';
 
 export const MOT_SCENARIOS = {
   boulders: { label: 'Artemis EVA · Boulder field', blurb: 'Five crew/rovers walk through a boulder field. They keep disappearing behind rocks.', targets: 5, boulders: 9, pd: 0.95, clutter: 0.8 },
@@ -26,6 +27,7 @@ export class MotWorld {
     this.bounds = { xmin: -38, xmax: 38, ymin: 0, ymax: 46 };
     this.rng = new RNG(seed * 9973 + 17);   // world + truth motion
     this.srng = new RNG(seed * 7717 + 5);   // sensor noise (separate stream: same truth regardless of detector settings)
+    this.arng = new RNG(seed * 4111 + 3);   // appearance noise (own stream: adding signatures changes nothing else)
     // low polar sun, matching the 3-D render: azimuth/elevation in the simulator frame
     this.sun = { az: Math.atan2(-25, -60), el: Math.atan2(9, Math.hypot(60, 25)) };
     this.t = 0; this.dt = 0.1; this.frame = 0;
@@ -109,11 +111,13 @@ export class MotWorld {
       const sr = sigRange(cam, v.range);
       const sb = cam.sigB * (v.visFrac < 0.9 ? 2 : 1);  // partially hidden: centroid jitters more
       dets.push(this._det(v.range + sr * s.randn(), v.visCenter + sb * s.randn()));
+      dets[dets.length - 1].feat = personSignature(t.id, v.visFrac, v.shadow ?? 0, this.arng);   // colour signature
       gt.push(t.id);
     }
     const nFalse = poisson(this.cfg.clutter, s);
     for (let k = 0; k < nFalse; k++) {
       dets.push(this._det(s.uniform(4, cam.range), cam.th + s.uniform(-cam.fov / 2, cam.fov / 2)));
+      dets[dets.length - 1].feat = clutterSignature(this.arng);
       gt.push(0);
     }
     return { dets, gt };

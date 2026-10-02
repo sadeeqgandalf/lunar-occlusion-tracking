@@ -20,6 +20,7 @@ import { hungarian } from './hungarian.js';
 import { visibility, detectionProb, shadowFraction } from './occlusion.js';
 import { sigRange } from './world.js';
 import { RNG } from '../core/rng.js';
+import { cosine } from './appearance.js';
 
 const NS = 64; // fixed antithetic samples of a 4-D standard normal (deterministic runs)
 const Z = (() => { const r = new RNG(424242), z = []; for (let i = 0; i < NS / 2; i++) { const v = [r.randn(), r.randn(), r.randn(), r.randn()]; z.push(v, v.map((q) => -q)); } return z; })();
@@ -35,14 +36,23 @@ export const TRACKER_DEFAULTS = {
   maxSigma: 7,        // ... or when 1-sigma position uncertainty exceeds this [m]
   pd: 0.95,
   clutter: 0.8,       // expected false detections per frame (spread uniformly over range x bearing)
+  // re-identification (off unless reid: true). Same rules as pytorch3d/lunar3d/tracker.py
+  reidSim: 0.86,      // a lost or coasting track is reclaimed only above this colour-signature similarity
+  reidSpeed: 1.6,     // ... and only if the person could have walked there: <= reidSpeed * gap + reidSlack metres
+  reidSlack: 3.0,
+  reidMemory: 30,     // seconds a deleted track is remembered
+  appearanceWeight: 8, // association: likelihood ratio x exp(w (similarity - reidSim)) (DeepSORT-style)
 };
 
 export class Tracker {
-  constructor(cam, boulders, { occlusionAware = true, negInfo = false, name, sun = null, ...params } = {}) {
+  constructor(cam, boulders, { occlusionAware = true, negInfo = false, reid = false, name, sun = null, ...params } = {}) {
     this.cam = cam; this.boulders = boulders; this.sun = sun; this.aware = occlusionAware; this.negInfo = occlusionAware && negInfo;
-    this.name = name || (this.negInfo ? 'Aware + neg. info' : occlusionAware ? 'Occlusion-aware' : 'Naive');
+    this.reid = reid;
+    this.name = name || (this.negInfo ? 'Aware + neg. info' : occlusionAware ? 'Occlusion-aware' : 'Naive') + (reid ? ' + re-ID' : '');
     this.p = { ...TRACKER_DEFAULTS, ...params };
-    this.tracks = []; this.nextId = 1; this.dt = 0.1;
+    this.tracks = []; this.nextId = 1; this.dt = 0.1; this.t = 0;
+    this.gallery = [];      // recently deleted confirmed tracks: id, colour signature, last position, time
+    this.reidEvents = [];   // { t, id, sim, gap } for display
   }
 
   /** Samples x_i = mean + L z_i of the track's predicted Gaussian, with P_D at each. */
@@ -96,18 +106,52 @@ export class Tracker {
     t.x = m; t.P = P.sym();
   }
 
-  _birth(d) {
+  _birth(d, keepId = null) {
     const cam = this.cam, c = Math.cos(d.bearing), s = Math.sin(d.bearing), r = d.range;
     const J = Mat.from([[c, -r * s], [s, r * c]]), Rm = Mat.diag([sigRange(cam, r) ** 2, cam.sigB ** 2 * 2]);
     const Pp = J.mul(Rm).mul(J.T());
     const P = Mat.diag([0, 0, 1.0, 1.0]);
     for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) P.set(i, j, Pp.get(i, j) + (i === j ? 0.05 : 0));
-    this.tracks.push({ id: this.nextId++, x: [cam.x + r * c, cam.y + r * s, 0, 0], P, r: this.p.rBirth, hits: 1, age: 0, lastSeen: 0, confirmed: false, hidden: false, pdExp: 1 });
+    const t = keepId === null
+      ? { id: this.nextId++, x: [cam.x + r * c, cam.y + r * s, 0, 0], P, r: this.p.rBirth, hits: 1, age: 0, lastSeen: 0, confirmed: false, hidden: false, pdExp: 1 }
+      : { id: keepId, x: [cam.x + r * c, cam.y + r * s, 0, 0], P, r: this.p.rConfirm, hits: 3, age: 0, lastSeen: 0, confirmed: true, hidden: false, pdExp: 1 };
+    if (d.feat) t.feat = d.feat.slice();
+    this.tracks.push(t);
+    return t;
+  }
+
+  /**
+   * Re-identification: a detection that no track's gate claimed. Is it someone we lost (deleted) or are still coasting
+   * on (hidden too long, so the gate no longer reaches)? Accept the most similar candidate above reidSim that could have
+   * walked here in the elapsed time; it keeps its old ID.
+   */
+  _reidentify(d) {
+    const p = this.p, cam = this.cam, x = cam.x + d.range * Math.cos(d.bearing), y = cam.y + d.range * Math.sin(d.bearing);
+    let best = null, bestSim = p.reidSim;
+    for (const t of this.tracks) {
+      if (!t.confirmed || t.lastSeen <= 3 || !t.feat) continue;
+      const gap = t.lastSeen * this.dt;
+      if (Math.hypot(x - t.x[0], y - t.x[1]) > p.reidSpeed * gap + p.reidSlack) continue;
+      const s = cosine(t.feat, d.feat); if (s > bestSim) { best = { live: t, gap }; bestSim = s; }
+    }
+    for (const g of this.gallery) {
+      const gap = this.t - g.t + 0.3;
+      if (Math.hypot(x - g.x, y - g.y) > p.reidSpeed * gap + p.reidSlack || this.tracks.some((t) => t.id === g.id)) continue;
+      const s = cosine(g.feat, d.feat); if (s > bestSim) { best = { gal: g, gap }; bestSim = s; }
+    }
+    if (!best) return false;
+    const old = best.live || best.gal;
+    if (best.live) this.tracks.splice(this.tracks.indexOf(best.live), 1); else this.gallery.splice(this.gallery.indexOf(best.gal), 1);
+    const t = this._birth(d, old.id);
+    t.feat = old.feat.map((v, i) => 0.5 * v + 0.5 * d.feat[i]);
+    this.reidEvents.push({ t: this.t, id: old.id, sim: bestSim, gap: best.gap });
+    return true;
   }
 
   /** Process one frame of detections ({range, bearing}). */
   step(dets) {
     const p = this.p;
+    this.t += this.dt;
     for (const t of this.tracks) { this._predict(t); t.age++; t.pdExp = this.expectedPd(t); t.hidden = t.pdExp < 0.3; }
     const kappa = p.clutter / (this.cam.fov * (this.cam.range - 4)); // clutter density per (m x rad)
 
@@ -125,7 +169,9 @@ export class Tracker {
         const nis = y[0] * (m.Si.get(0, 0) * y[0] + m.Si.get(0, 1) * y[1]) + y[1] * (m.Si.get(1, 0) * y[0] + m.Si.get(1, 1) * y[1]);
         if (nis > p.gate) return;
         g[i][j] = Math.exp(-0.5 * nis) / (2 * Math.PI * Math.sqrt(det));
-        row[j] = -Math.log((pdi * g[i][j]) / kappa);
+        let lr = (pdi * g[i][j]) / kappa;
+        if (this.reid && d.feat && t.feat) lr *= Math.exp(p.appearanceWeight * (cosine(t.feat, d.feat) - p.reidSim)); // appearance
+        row[j] = -Math.log(lr);
       });
       row[D + i] = -Math.log(1 - pdi * PG);
       return row;
@@ -146,6 +192,7 @@ export class Tracker {
         t.r = (t.r * (pdH * g[i][j] + (1 - pdH) * kappa)) / (t.r * pdH * g[i][j] + (1 - t.r * pdH) * kappa);
         t.hits++; t.lastSeen = 0;
         if (!t.confirmed && t.r >= p.rConfirm && t.hits >= 3) t.confirmed = true;
+        if (this.reid && d.feat) t.feat = t.feat ? t.feat.map((v, k) => 0.85 * v + 0.15 * d.feat[k]) : d.feat.slice();
       } else { // missed: Bayes existence update with the EXPECTED detection probability
         const pd = t.pdExp;
         t.r = (t.r * (1 - pd)) / (1 - t.r * pd); t.lastSeen++;
@@ -154,11 +201,19 @@ export class Tracker {
     });
 
     const gated = (j) => cost.some((row) => row[j] < FORBID);
-    this.tracks = this.tracks.filter((t) => t.r >= p.rDelete && Math.sqrt(Math.max(t.P.get(0, 0), t.P.get(1, 1))) <= p.maxSigma);
+    const keep = [];
+    for (const t of this.tracks) {
+      if (t.r >= p.rDelete && Math.sqrt(Math.max(t.P.get(0, 0), t.P.get(1, 1))) <= p.maxSigma) keep.push(t);
+      else if (this.reid && t.confirmed && t.feat) this.gallery.push({ id: t.id, feat: t.feat, x: t.x[0], y: t.x[1], t: this.t });
+    }
+    this.tracks = keep;
+    if (this.reid) this.gallery = this.gallery.filter((g) => this.t - g.t <= p.reidMemory);
     // births only from detections that fall outside every surviving track's gate (prevents duplicate tracks)
     dets.forEach((d, j) => {
       if (used.has(j)) return;
-      if (!gated(j)) this._birth(d);
+      if (gated(j)) return;
+      if (this.reid && d.feat && this._reidentify(d)) return;
+      this._birth(d);
     });
   }
 
