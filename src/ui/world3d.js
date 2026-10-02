@@ -132,10 +132,25 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
   const getPool = (kind, make) => { const i = (pool[kind].used = (pool[kind].used || 0) + 1) - 1; if (!pool[kind][i]) { pool[kind][i] = make(); dyn.add(pool[kind][i]); } pool[kind][i].visible = true; return pool[kind][i]; };
   const resetPools = () => { for (const k of Object.keys(pool)) { pool[k].used = 0; for (const m of pool[k]) m.visible = false; } };
 
-  function render(sess, { sel, color, showTruth, marks = [] }) {
-    if (!world || sess.world !== world) setWorld(sess.world);
+  let heatMesh = null, heatTex = null;
+  /** The PHD "where could anyone be?" density as a glowing sheet just above the (flat) work-area ground. */
+  function updateHeat(h) {
+    if (!h) { if (heatMesh) heatMesh.visible = false; return; }
+    if (!heatMesh || heatMesh.userData.key !== `${h.x0},${h.x1},${h.y0},${h.y1}`) {
+      if (heatMesh) { dyn.remove(heatMesh); heatMesh.geometry.dispose(); heatMesh.material.dispose(); heatTex.dispose(); }
+      heatTex = new THREE.CanvasTexture(h.canvas); heatTex.colorSpace = THREE.SRGBColorSpace;
+      const g = new THREE.PlaneGeometry(h.x1 - h.x0, h.y1 - h.y0); g.rotateX(-Math.PI / 2);
+      heatMesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ map: heatTex, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending }));
+      heatMesh.position.copy(toV((h.x0 + h.x1) / 2, (h.y0 + h.y1) / 2, 0.06)); heatMesh.renderOrder = 4;
+      heatMesh.userData.key = `${h.x0},${h.x1},${h.y0},${h.y1}`; dyn.add(heatMesh);
+    }
+    heatTex.image = h.canvas; heatTex.needsUpdate = true; heatMesh.visible = true;
+  }
+
+  function render(sess, { sel, color, showTruth, marks = [], heat = null }) {
+    if (!world || sess.world !== world) { if (heatMesh) dyn.remove(heatMesh); setWorld(sess.world); heatMesh = null; }
     const w = sess.world, col = new THREE.Color(color);
-    resetPools();
+    resetPools(); updateHeat(heat);
     const labels1 = [], labels2 = [];
 
     // people follow the simulation (heading: sim angle -> three yaw; NASA model faces +z)
@@ -181,7 +196,7 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
     if (viewport(camEl, roverCam)) {
       roverCam.fov = (2 * Math.atan(Math.tan(cam.fov / 2) / roverCam.aspect) * 180) / Math.PI; roverCam.updateProjectionMatrix();
       for (const p of people.values()) p.visible = true;
-      const rings = [...pool.ring, ...pool.area, ...pool.ping]; rings.forEach((m) => { m.userData.v = m.visible; m.visible = false; }); // camera image = the scene only
+      const rings = [...pool.ring, ...pool.area, ...pool.ping, ...(heatMesh ? [heatMesh] : [])]; rings.forEach((m) => { m.userData.v = m.visible; m.visible = false; }); // camera image = the scene only
       R.render(scene, roverCam); rings.forEach((m) => { m.visible = m.userData.v; });
       // ID masks: re-draw each tracked person in their track's colour with depth test LessEqual against the scene
       // just rendered, so only their VISIBLE pixels are painted (a modal instance mask, as in MOTS datasets)

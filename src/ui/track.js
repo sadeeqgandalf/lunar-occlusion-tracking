@@ -10,7 +10,7 @@ import { idColor, idColorA, stripeOf, label, labelConfirmed, personName } from '
 
 const $ = (id) => document.getElementById(id);
 // default seed 8: a typical run (same ranking as the 20-seed average), not the best one (15) or the worst (7, 9, 16)
-const S = { scenario: 'boulders', seed: 8, speed: 2, paused: false, sel: 3, showTruth: true, view: '3d', overrides: {}, sw: [] };
+const S = { heat: true, scenario: 'boulders', seed: 8, speed: 2, paused: false, sel: 3, showTruth: true, view: '3d', overrides: {}, sw: [] };
 let w3d = null, w3dLost = null; // w3dLost: a 3-D view waiting for the browser to restore its GPU context
 const COLORS = ['#4ade80', '#4cc9f0', '#ff6b6b', '#bd8cff'];
 const PLAIN = {
@@ -22,7 +22,7 @@ const PLAIN = {
 let sess, feed = [], pending = new Map(), seenEv = [], seenReid = [], prevHidden = new Map(), marks = [], prevMatch = [], idHist = [];
 
 function newSession() {
-  sess = new MotSession({ scenario: S.scenario, seed: S.seed, overrides: S.overrides });
+  sess = new MotSession({ scenario: S.scenario, seed: S.seed, overrides: S.overrides, phd: true });
   S.sw = sess.runs.map(() => []);
   feed = []; pending = new Map(); seenEv = sess.runs.map(() => 0); seenReid = sess.runs.map(() => 0); prevHidden = new Map(); marks = []; prevMatch = sess.runs.map(() => new Map()); idHist = sess.runs.map(() => new Map());
   pushFeed(MOT_SCENARIOS[S.scenario].label, '');
@@ -115,7 +115,27 @@ function updateCards() {
   $('clock').textContent = `T+${sess.world.t.toFixed(1).padStart(5, '0')} s`;
   lineChart($('chSw'), { title: '', tMin: 0, tMax: Math.max(10, sess.world.t), series: S.sw.map((pts, i) => ({ color: COLORS[i], width: i === S.sel ? 2.2 : 1.4, pts })) });
   const hiddenNow = sess.world.targets.filter((t) => isHidden(t.vis)).length, col = COLORS[S.sel];
-  $('now').innerHTML = `<span class="sw" style="background:${col}"></span><b style="color:${col}">${T.name}</b> · ${hiddenNow}/${sess.world.targets.length} hidden`;
+  $('now').innerHTML = `<span class="sw" style="background:${col}"></span><b style="color:${col}">${T.name}</b> · ${hiddenNow}/${sess.world.targets.length} hidden${sess.phd && S.heat ? ` · <span style="color:#ffd27a">heat map expects ${sess.phd.expectedCount.toFixed(1)} people</span>` : ''}`;
+}
+
+// ------------------------------------------------------------------ heat map ("where could anyone be?")
+const heatCv = document.createElement('canvas');
+const STOPS = [[0, 0, 0, 0, 0], [0.2, 110, 30, 140, 0.35], [0.45, 220, 60, 90, 0.6], [0.7, 250, 150, 40, 0.75], [1, 255, 245, 170, 0.85]];
+/** PHD density -> an image (top row = far side of the field), coloured from transparent purple to bright yellow. */
+function heatImage() {
+  if (!sess.phd) return null;
+  const h = sess.phd.density(); heatCv.width = h.nx; heatCv.height = h.ny;
+  const ctx = heatCv.getContext('2d'), img = ctx.createImageData(h.nx, h.ny);
+  for (let k = 0; k < h.D.length; k++) {
+    const v = Math.min(1, h.D[k] / 0.14);   // ~one person concentrated in a few m^2 = full glow
+    let a = STOPS[0], b = STOPS[1];
+    for (let q = 1; q < STOPS.length; q++) if (v <= STOPS[q][0]) { a = STOPS[q - 1]; b = STOPS[q]; break; } else { a = STOPS[q - 1]; b = STOPS[q]; }
+    const f = Math.min(1, Math.max(0, (v - a[0]) / (b[0] - a[0] || 1)));
+    for (let c = 0; c < 3; c++) img.data[4 * k + c] = a[c + 1] + f * (b[c + 1] - a[c + 1]);
+    img.data[4 * k + 3] = 255 * (a[4] + f * (b[4] - a[4]));
+  }
+  ctx.putImageData(img, 0, 0);
+  return { canvas: heatCv, ...h };
 }
 
 // ------------------------------------------------------------------ canvases
@@ -169,6 +189,13 @@ function drawMap() {
   const g = c.createRadialGradient(cx, cy, 0, cx, cy, cam.range * s); g.addColorStop(0, '#5a5d63'); g.addColorStop(1, '#3a3d43');
   c.fillStyle = g; c.fill(); c.clip();
   for (let k = 0; k < 140; k++) { const x = xmin + frac(Math.sin(k * 3.17) * 999) * (xmax - xmin), y = ymin + frac(Math.sin(k * 7.31) * 999) * (ymax - ymin), [px, py] = P(x, y); c.fillStyle = '#ffffff0d'; c.beginPath(); c.arc(px, py, 1 + frac(k * 0.37) * 3, 0, TAU); c.fill(); } // regolith speckle
+  // heat map: where the PHD filter thinks people could be (glow pools behind rocks when someone hides)
+  if (S.heat && sess.phd) {
+    const hm = heatImage(), [hx0, hy0] = P(hm.x0, hm.y1), [hx1, hy1] = P(hm.x1, hm.y0);
+    c.imageSmoothingEnabled = true; c.globalCompositeOperation = 'lighter';               // glow, like the 3-D sheet
+    c.drawImage(hm.canvas, hx0, hy0, hx1 - hx0, hy1 - hy0); c.drawImage(hm.canvas, hx0, hy0, hx1 - hx0, hy1 - hy0);
+    c.globalCompositeOperation = 'source-over';
+  }
   // blind zones behind each boulder
   let biggest = null;
   for (const b of w.boulders) {
@@ -324,7 +351,7 @@ function frameBody(now) {
   if (use3d) {
     marks = marks.filter((m) => sess.world.t - m.t < 4);
     try {
-      w3d.render(sess, { sel: S.sel, color: COLORS[S.sel], showTruth: S.showTruth, marks: marks.filter((m) => m.run === S.sel).map((m) => ({ ...m, alpha: Math.max(1 - (sess.world.t - m.t) / 4, 0.2) })) });
+      w3d.render(sess, { heat: S.heat ? heatImage() : null, sel: S.sel, color: COLORS[S.sel], showTruth: S.showTruth, marks: marks.filter((m) => m.run === S.sel).map((m) => ({ ...m, alpha: Math.max(1 - (sess.world.t - m.t) / 4, 0.2) })) });
     } catch (err) { // fall back to the 2-D views and say why
       showError('3-D view', err); if (w3d.isLost?.()) w3dLost = w3d; w3d = null; S.view = '2d';
       [...$('viewsw').children].forEach((b) => b.classList.toggle('on', b.dataset.v === '2d'));
@@ -346,6 +373,7 @@ function wire() {
   $('speed').onclick = (e) => { const v = e.target.dataset.v; if (!v) return; S.speed = +v; [...$('speed').children].forEach((b) => b.classList.toggle('on', b === e.target)); };
   $('cards').onclick = (e) => { const el = e.target.closest('.tcard'); if (!el) return; S.sel = +el.dataset.i; buildCards(); updateCards(); };
   $('optTruth').onchange = (e) => { S.showTruth = e.target.checked; };
+  $('optHeat').onchange = (e) => { S.heat = e.target.checked; };
 
   // collapsible side panels, remembered per page
   const KEY = 'panels:' + location.pathname;

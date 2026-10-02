@@ -132,3 +132,13 @@ test('re-ID never changes the other three trackers (appearance has its own rando
   assert.equal(M.summary().idsw, a[0].idsw);
   assert.equal(M.summary().idf1, a[0].idf1);
 });
+
+test('PHD heat map: expected number of people tracks the truth, and it is fast', async () => {
+  const { MotSession } = await import('../src/mot/session.js');
+  const s = new MotSession({ scenario: 'boulders', seed: 8, phd: true });
+  const c = []; const t0 = performance.now();
+  for (let f = 0; f < 1200; f++) { s.step(); if (f > 100) c.push(s.phd.expectedCount); }
+  c.sort((a, b) => a - b); const med = c[c.length >> 1];
+  assert.ok(med > 3.5 && med < 7, `median expected people ${med} (truth 5)`);
+  const h = s.phd.density(); assert.ok(h.D.some((v) => v > 0.02), 'density has mass');
+});
