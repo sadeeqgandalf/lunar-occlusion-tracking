@@ -379,8 +379,17 @@ function wire() {
   $('speed').onclick = (e) => { const v = e.target.dataset.v; if (!v) return; S.speed = +v; [...$('speed').children].forEach((b) => b.classList.toggle('on', b === e.target)); };
   $('cards').onclick = (e) => { const el = e.target.closest('.tcard'); if (!el) return; S.sel = +el.dataset.i; buildCards(); updateCards(); };
   $('optTruth').onchange = (e) => { S.showTruth = e.target.checked; };
-  $('optHeat').onchange = (e) => { S.heat = e.target.checked; };
-  $('optLander').onchange = (e) => { S.lander = e.target.checked; newSession(); pushFeed(S.lander ? 'Lander camera on: two viewpoints' : 'Lander camera off', ''); };
+  // the same two switches live in the 3-D view (buttons) and in the People panel (checkboxes); keep them in step
+  const syncOpts = () => {
+    $('optHeat').checked = S.heat; $('optLander').checked = S.lander;
+    $('btnHeat').classList.toggle('on', S.heat); $('btnHeat').textContent = `🔥 Heat map: ${S.heat ? 'on' : 'off'}`;
+    $('btnLander').classList.toggle('on', S.lander); $('btnLander').textContent = `📷 Lander camera: ${S.lander ? 'on' : 'off'}`;
+  };
+  const setHeat = (v) => { S.heat = v; syncOpts(); };
+  const setLander = (v) => { S.lander = v; syncOpts(); newSession(); pushFeed(S.lander ? 'Lander camera on: two viewpoints fused' : 'Lander camera off', ''); };
+  $('optHeat').onchange = (e) => setHeat(e.target.checked); $('btnHeat').onclick = () => setHeat(!S.heat);
+  $('optLander').onchange = (e) => setLander(e.target.checked); $('btnLander').onclick = () => setLander(!S.lander);
+  syncOpts();
 
   // collapsible side panels, remembered per page
   const KEY = 'panels:' + location.pathname;
