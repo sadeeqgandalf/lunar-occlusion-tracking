@@ -17,10 +17,12 @@ export const CAMERA = {
   sigR0: 0.08, sigRk: 0.0012,        // stereo depth noise: sigR = sigR0 + sigRk * r^2  [m]
   imgW: 960, imgH: 300, targetH: 1.8, targetR: 0.4,
 };
+export const LANDER = { x: 24, y: 46, h: 6, fov: (90 * Math.PI) / 180, range: 60 };   // lander camera, 6 m up
+export const LANDER_AIM = { x: 0, y: 18 };                                             // ... aimed at the worksite
 export const sigRange = (cam, r) => cam.sigR0 + cam.sigRk * r * r;
 
 export class MotWorld {
-  constructor(scenario = 'boulders', seed = 7, overrides = {}) {
+  constructor(scenario = 'boulders', seed = 7, overrides = {}, { lander = false } = {}) {
     this.cfg = { ...MOT_SCENARIOS[scenario] || MOT_SCENARIOS.boulders, ...overrides };
     this.id = scenario; this.seed = seed;
     this.cam = { ...CAMERA };
@@ -31,6 +33,10 @@ export class MotWorld {
     // low polar sun, matching the 3-D render: azimuth/elevation in the simulator frame
     this.sun = { az: Math.atan2(-25, -60), el: Math.atan2(9, Math.hypot(60, 25)) };
     this.t = 0; this.dt = 0.1; this.frame = 0;
+    // optional second camera on a lander at 6 m, looking back across the worksite (own random streams, so the
+    // rover's detections, and every single-camera result, are unchanged)
+    this.lander = lander ? { ...CAMERA, ...LANDER, th: Math.atan2(LANDER_AIM.y - LANDER.y, LANDER_AIM.x - LANDER.x) } : null;
+    if (lander) { this.lrng = new RNG(seed * 6151 + 11); this.larng = new RNG(seed * 3313 + 29); }
     this._placeBoulders(); this._spawnTargets();
   }
 
@@ -86,14 +92,22 @@ export class MotWorld {
         if (d < b.r + 0.4) { t.x = b.x + (dx / d) * (b.r + 0.4); t.y = b.y + (dy / d) * (b.r + 0.4); }
       }
       t.vis = this.view(t.x, t.y);
+      if (this.lander) this._fuse(t);
       if (this.frame % 3 === 0) { t.trail.push([t.x, t.y]); if (t.trail.length > 120) t.trail.shift(); }
     }
     this.t += dt; this.frame++;
   }
 
-  /** What the camera can see of a person at (x, y): geometry, optional cast-shadow darkness, and detection probability. */
-  view(x, y) {
-    const v = visibility(this.cam, this.boulders, x, y, this.cam.targetR);
+  /** With a lander: what it sees of person t, and the fused view used for scoring (hidden = hidden from BOTH cameras). */
+  _fuse(t) {
+    t.visL = this.view(t.x, t.y, this.lander);
+    const a = t.vis, b = t.visL;
+    t.visFused = { inFov: a.inFov || b.inFov, pd: Math.max(a.inFov ? a.pd : 0, b.inFov ? b.pd : 0), visFrac: Math.max(a.visFrac, b.visFrac), shadow: a.shadow };
+  }
+
+  /** What a camera can see of a person at (x, y): geometry, optional cast-shadow darkness, and detection probability. */
+  view(x, y, cam = this.cam) {
+    const v = visibility(cam, this.boulders, x, y, this.cam.targetR);
     v.shadow = this.cfg.shadows ? shadowFraction(this.boulders, x, y, this.sun) : 0;
     v.pd = detectionProb(v.inFov, v.visFrac, this.cfg.pd, v.shadow);
     return v;
@@ -103,28 +117,33 @@ export class MotWorld {
    * One camera frame of detections. The tracker gets ONLY `dets` (no identities). `gt[i]` is the true target id
    * of dets[i] (0 = clutter), kept separate for scoring.
    */
-  sense() {
-    const cam = this.cam, s = this.srng, dets = [], gt = [];
+  sense() { return this._sense(this.cam, 'vis', this.srng, this.arng); }
+  /** The lander camera's frame (same detector model, its own viewpoint and random streams). */
+  senseLander() { return this._sense(this.lander, 'visL', this.lrng, this.larng); }
+
+  _sense(cam, field, s, as) {
+    const dets = [], gt = [];
+    if (field === 'visL') for (const t of this.targets) if (!t.visL) this._fuse(t);
     for (const t of this.targets) {
-      const v = t.vis || this.view(t.x, t.y);
+      const v = t[field] || this.view(t.x, t.y, cam);
       if (s.next() >= v.pd) continue;
       const sr = sigRange(cam, v.range);
       const sb = cam.sigB * (v.visFrac < 0.9 ? 2 : 1);  // partially hidden: centroid jitters more
-      dets.push(this._det(v.range + sr * s.randn(), v.visCenter + sb * s.randn()));
-      dets[dets.length - 1].feat = personSignature(t.id, v.visFrac, v.shadow ?? 0, this.arng);   // colour signature
+      dets.push(this._det(v.range + sr * s.randn(), v.visCenter + sb * s.randn(), cam));
+      dets[dets.length - 1].feat = personSignature(t.id, v.visFrac, v.shadow ?? 0, as);   // colour signature
       gt.push(t.id);
     }
     const nFalse = poisson(this.cfg.clutter, s);
     for (let k = 0; k < nFalse; k++) {
-      dets.push(this._det(s.uniform(4, cam.range), cam.th + s.uniform(-cam.fov / 2, cam.fov / 2)));
-      dets[dets.length - 1].feat = clutterSignature(this.arng);
+      dets.push(this._det(s.uniform(4, cam.range), cam.th + s.uniform(-cam.fov / 2, cam.fov / 2), cam));
+      dets[dets.length - 1].feat = clutterSignature(as);
       gt.push(0);
     }
     return { dets, gt };
   }
 
-  _det(range, bearing) {
-    const cam = this.cam, f = cam.imgW / 2 / Math.tan(cam.fov / 2), phi = wrapAngle(bearing - cam.th);
+  _det(range, bearing, cam = this.cam) {
+    const f = cam.imgW / 2 / Math.tan(cam.fov / 2), phi = wrapAngle(bearing - cam.th);
     return { range, bearing, u: cam.imgW / 2 - f * Math.tan(phi), hPx: (f * cam.targetH) / Math.max(range, 1) };
   }
 }

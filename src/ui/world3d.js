@@ -106,7 +106,14 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
     mast.position.copy(base).add(new THREE.Vector3(0, MAST_H / 2, 0)); mast.castShadow = true; staticGroup.add(mast);
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.22, 0.28), new THREE.MeshStandardMaterial({ color: 0x222428, metalness: 0.5, roughness: 0.5 }));
     head.position.copy(base).add(new THREE.Vector3(0, MAST_H, 0)); staticGroup.add(head);
-    if (lm) { const m = lm.clone(); m.position.copy(toV(-26, -9, height(-26, -9))); m.rotation.y = 0.6; staticGroup.add(m); }
+    if (lm) {
+      const m = lm.clone();
+      if (w.lander) {   // the lander carries the second camera: put the module just behind the camera position
+        const L = w.lander, bx = L.x - 3 * Math.cos(L.th), by = L.y - 3 * Math.sin(L.th);
+        m.position.copy(toV(bx, by, height(bx, by))); m.rotation.y = L.th;
+      } else { m.position.copy(toV(-26, -9, height(-26, -9))); m.rotation.y = 0.6; }
+      staticGroup.add(m);
+    }
 
     // people (NASA astronaut model), one per simulated target
     for (const t of w.targets) {
@@ -127,7 +134,7 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
   // or its click never fires. Capture phase on the panel runs before OrbitControls' own listener there.
   mainEl.addEventListener('pointerdown', (e) => { if (e.target.closest('button, a, input, select, label')) e.stopPropagation(); }, true);
   controls.target.set(0, 0.8, -19); controls.enableDamping = true; controls.maxPolarAngle = Math.PI * 0.495; controls.minDistance = 4; controls.maxDistance = 160;
-  const roverCam = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
+  const roverCam = new THREE.PerspectiveCamera(60, 1, 0.1, 2000), landerCam = new THREE.PerspectiveCamera(60, 1, 0.1, 2000);
 
   const getPool = (kind, make) => { const i = (pool[kind].used = (pool[kind].used || 0) + 1) - 1; if (!pool[kind][i]) { pool[kind][i] = make(); dyn.add(pool[kind][i]); } pool[kind][i].visible = true; return pool[kind][i]; };
   const resetPools = () => { for (const k of Object.keys(pool)) { pool[k].used = 0; for (const m of pool[k]) m.visible = false; } };
@@ -189,33 +196,46 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
     }
     for (const mk of marks) labels1.push({ p: toV(mk.x, mk.y, height(mk.x, mk.y) + PERSON_H + 1.9), text: mk.reid ? 're-ID ✔' : mk.kept ? '✔ same ID' : '✘ new ID', color: mk.kept ? '#4ade80' : '#ff8a8a', bg: mk.kept ? '#14532d' : '#4c1219', fg: mk.kept ? '#4ade80' : '#ff8a8a', font: 'bold 13px system-ui', alpha: mk.alpha });
 
-    // rover camera: at the mast head, looking along the simulated optical axis, same horizontal field of view
-    const cam = w.cam, eye = toV(cam.x, cam.y, height(cam.x, cam.y) + MAST_H);
-    roverCam.position.copy(eye); roverCam.lookAt(eye.clone().add(new THREE.Vector3(Math.cos(cam.th), -0.05, -Math.sin(cam.th))));
+    // camera views: the rover's mast camera, and (with a lander) the lander camera beside it in the same strip
     if (!fitRenderer(R, canvas, free)) return;
-    if (viewport(camEl, roverCam)) {
-      roverCam.fov = (2 * Math.atan(Math.tan(cam.fov / 2) / roverCam.aspect) * 180) / Math.PI; roverCam.updateProjectionMatrix();
+    const ov = camOverlay, dpr = window.devicePixelRatio || 1, ow = ov.clientWidth, oh = ov.clientHeight;   // size + clear once
+    if (ov.width !== Math.round(ow * dpr) || ov.height !== Math.round(oh * dpr)) { ov.width = Math.round(ow * dpr); ov.height = Math.round(oh * dpr); }
+    ov.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0); ov.getContext('2d').clearRect(0, 0, ow, oh);
+    const views = w.lander ? [[w.cam, roverCam, 0, 0.5, 'vis', MAST_H, null], [w.lander, landerCam, 0.5, 1, 'visL', w.lander.h, 'LANDER CAMERA']]
+      : [[w.cam, roverCam, 0, 1, 'vis', MAST_H, null]];
+    for (const [cam, vcam, f0, f1, field, eyeH, title] of views) {
+      const eye = toV(cam.x, cam.y, height(cam.x, cam.y) + eyeH), tilt = cam === w.cam ? -0.05 : -Math.atan2(eyeH, 26);
+      vcam.position.copy(eye); vcam.lookAt(eye.clone().add(new THREE.Vector3(Math.cos(cam.th), Math.tan(tilt), -Math.sin(cam.th))));
+      if (!viewport(camEl, vcam, f0, f1)) continue;
+      vcam.fov = (2 * Math.atan(Math.tan(cam.fov / 2) / vcam.aspect) * 180) / Math.PI; vcam.updateProjectionMatrix();
       for (const p of people.values()) p.visible = true;
       const rings = [...pool.ring, ...pool.area, ...pool.ping, ...(heatMesh ? [heatMesh] : [])]; rings.forEach((m) => { m.userData.v = m.visible; m.visible = false; }); // camera image = the scene only
-      R.render(scene, roverCam); rings.forEach((m) => { m.visible = m.userData.v; });
+      R.render(scene, vcam); rings.forEach((m) => { m.visible = m.userData.v; });
       // ID masks: re-draw each tracked person in their track's colour with depth test LessEqual against the scene
       // just rendered, so only their VISIBLE pixels are painted (a modal instance mask, as in MOTS datasets)
       const T = sess.runs[sel].tracker, M = sess.runs[sel].metrics, live = new Set(T.reported().map((k) => k.id)), boxes = [];
       R.autoClear = false;
       for (const t of w.targets) {
-        const g = people.get(t.id), kid = M.lastMatch.get(t.id), seen = t.vis.inFov && !isHidden(t.vis);
+        const v = t[field] || t.vis, g = people.get(t.id), kid = M.lastMatch.get(t.id), seen = v.inFov && !isHidden(v);
         if (!g || !seen) continue;
         const has = kid !== undefined && live.has(kid), n = has ? label(T, kid) : 0, c = has ? idColor(n) : '#9aa3b2';
         if (has) {
           const mm = maskMat(c), saved = [];
           g.traverse((o) => { if (o.isMesh) { saved.push([o, o.material]); o.material = mm; } });
-          R.render(g, roverCam); saved.forEach(([o, mat]) => { o.material = mat; });
+          R.render(g, vcam); saved.forEach(([o, mat]) => { o.material = mat; });
         }
         boxes.push({ obj: g, color: c, text: has ? `#${n}` : 'no ID', dashed: !has });
       }
       R.autoClear = true;
-      drawLabels(camOverlay, roverCam, labels2);
-      drawBoxes(camOverlay, camEl, roverCam, boxes);
+      if (cam === w.cam) drawTags(ov, camEl, vcam, labels2, f0, f1);
+      drawBoxes(ov, camEl, vcam, boxes, f0, f1);
+      if (title) {
+        const c2 = ov.getContext('2d'), x = f0 * camEl.clientWidth;
+        c2.save(); c2.font = 'bold 11px system-ui'; c2.fillStyle = '#0a0e16cc'; c2.fillRect(x + 8, 8, c2.measureText(title).width + 14, 20);
+        c2.fillStyle = '#ffd166'; c2.fillText(title, x + 15, 22);
+        if (f0 > 0) { c2.fillStyle = '#ffffff55'; c2.fillRect(x, 0, 1.5, camEl.clientHeight); }
+        c2.restore();
+      }
     }
     for (const p of people.values()) p.visible = showTruth;
     if (viewport(mainEl, free)) { controls.update(); R.render(scene, free); drawLabels(mainOverlay, free, labels1); }
@@ -229,25 +249,38 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
   };
   /** Bounding boxes from each person's projected 3-D extent, in their ID colour, drawn on the camera overlay. */
   const _box = new THREE.Box3(), _v = new THREE.Vector3();
-  function drawBoxes(ov, el, cam, items) {
-    const c = ov.getContext('2d'), w = el.clientWidth, h = el.clientHeight;
+  function drawBoxes(ov, el, cam, items, f0 = 0, f1 = 1) {
+    const c = ov.getContext('2d'), w = el.clientWidth * (f1 - f0), h = el.clientHeight, ox = el.clientWidth * f0;
     for (const it of items) {
       _box.setFromObject(it.obj); let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for (let i = 0; i < 8; i++) {
         _v.set(i & 1 ? _box.max.x : _box.min.x, i & 2 ? _box.max.y : _box.min.y, i & 4 ? _box.max.z : _box.min.z).project(cam);
         if (_v.z > 1) continue;
-        const x = (_v.x * 0.5 + 0.5) * w, y = (-_v.y * 0.5 + 0.5) * h; x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+        const x = ox + (_v.x * 0.5 + 0.5) * w, y = (-_v.y * 0.5 + 0.5) * h; x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
       }
-      if (!(x1 > x0) || x1 < 0 || x0 > w) continue;
+      if (!(x1 > x0) || x1 < ox || x0 > ox + w) continue;
       c.save(); c.strokeStyle = it.color; c.lineWidth = 2.5; c.setLineDash(it.dashed ? [5, 4] : []); c.strokeRect(x0 - 2, y0 - 2, x1 - x0 + 4, y1 - y0 + 4);
       c.font = 'bold 12px system-ui'; const tw = c.measureText(it.text).width + 10;
       c.setLineDash([]); c.fillStyle = it.color; c.fillRect(x0 - 2, y0 - 20, tw, 17); c.fillStyle = '#06101a'; c.fillText(it.text, x0 + 3, y0 - 7); c.restore();
     }
   }
 
-  /** Restrict drawing to the part of the shared canvas under `el` (WebGL viewports start bottom-left). */
-  function viewport(el, cam) {
-    const c = canvas.getBoundingClientRect(), r = el.getBoundingClientRect(), w = r.width, h = r.height;
+  /** Dashed "#11?" tags for hidden-person guesses, drawn on a camera overlay (no clearing: several views share it). */
+  function drawTags(ov, el, cam, items, f0 = 0, f1 = 1) {
+    const c = ov.getContext('2d'), w = el.clientWidth * (f1 - f0), h = el.clientHeight, ox = el.clientWidth * f0;
+    for (const it of items) {
+      _v.copy(it.p).project(cam); if (_v.z > 1 || Math.abs(_v.x) > 1.05) continue;
+      const x = ox + (_v.x * 0.5 + 0.5) * w, y = (-_v.y * 0.5 + 0.5) * h;
+      c.save(); c.font = 'bold 12px system-ui'; const tw = c.measureText(it.text).width + 12;
+      c.fillStyle = '#0a0e16dd'; c.fillRect(x - tw / 2, y - 18, tw, 17); c.setLineDash([3, 3]); c.strokeStyle = it.color; c.lineWidth = 1.5;
+      c.strokeRect(x - tw / 2, y - 18, tw, 17); c.fillStyle = it.color; c.textAlign = 'center'; c.fillText(it.text, x, y - 5); c.restore();
+    }
+  }
+
+  /** Restrict drawing to the part of the shared canvas under `el` (WebGL viewports start bottom-left); f0..f1 = horizontal share. */
+  function viewport(el, cam, f0 = 0, f1 = 1) {
+    const c = canvas.getBoundingClientRect(), r0 = el.getBoundingClientRect(), r = { left: r0.left + f0 * r0.width, width: (f1 - f0) * r0.width, bottom: r0.bottom, height: r0.height };
+    const w = r.width, h = r.height;
     if (w < 2 || h < 2) return false;
     const x = r.left - c.left, y = c.bottom - r.bottom;
     R.setViewport(x, y, w, h); R.setScissor(x, y, w, h); R.setScissorTest(true);

@@ -5,8 +5,8 @@ import { MotMetrics } from './metrics.js';
 import { ParticlePHD } from './phd.js';
 
 export class MotSession {
-  constructor({ scenario = 'boulders', seed = 7, overrides = {}, trackerParams = {}, phd = false } = {}) {
-    this.world = new MotWorld(scenario, seed, overrides);
+  constructor({ scenario = 'boulders', seed = 7, overrides = {}, trackerParams = {}, phd = false, lander = false } = {}) {
+    this.world = new MotWorld(scenario, seed, overrides, { lander });
     const W = this.world, pd = W.cfg.pd, clutter = W.cfg.clutter, sun = W.cfg.shadows ? W.sun : null;
     // Ablation: identical trackers except for how they treat occlusion; the 4th also recognises people by appearance.
     this.runs = [
@@ -23,10 +23,14 @@ export class MotSession {
     W.step();
     const { dets, gt } = W.sense();
     this.last = { dets, gt };
-    if (this.phd) this.phd.step(dets);
+    const frames = [{ cam: W.cam, dets }];
+    if (W.lander) { const L = W.senseLander(); this.last.ldets = L.dets; this.last.lgt = L.gt; frames.push({ cam: W.lander, dets: L.dets }); }
+    if (this.phd) this.phd.step(frames);
     for (const r of this.runs) {
       // trackers never see identities; only the re-ID tracker gets each detection's colour signature
-      r.tracker.step(dets.map((d) => (r.tracker.reid ? { range: d.range, bearing: d.bearing, feat: d.feat } : { range: d.range, bearing: d.bearing })));
+      const strip = (ds) => ds.map((d) => (r.tracker.reid ? { range: d.range, bearing: d.bearing, feat: d.feat } : { range: d.range, bearing: d.bearing }));
+      if (frames.length === 1) r.tracker.step(strip(dets));
+      else r.tracker.stepFrames(frames.map((f) => ({ cam: f.cam, dets: strip(f.dets) })));
       r.metrics.update(W, r.tracker);
     }
   }

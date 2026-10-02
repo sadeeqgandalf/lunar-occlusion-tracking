@@ -10,7 +10,7 @@ import { idColor, idColorA, stripeOf, label, labelConfirmed, personName } from '
 
 const $ = (id) => document.getElementById(id);
 // default seed 8: a typical run (same ranking as the 20-seed average), not the best one (15) or the worst (7, 9, 16)
-const S = { heat: true, scenario: 'boulders', seed: 8, speed: 2, paused: false, sel: 3, showTruth: true, view: '3d', overrides: {}, sw: [] };
+const S = { heat: true, lander: false, scenario: 'boulders', seed: 8, speed: 2, paused: false, sel: 3, showTruth: true, view: '3d', overrides: {}, sw: [] };
 let w3d = null, w3dLost = null; // w3dLost: a 3-D view waiting for the browser to restore its GPU context
 const COLORS = ['#4ade80', '#4cc9f0', '#ff6b6b', '#bd8cff'];
 const PLAIN = {
@@ -22,7 +22,7 @@ const PLAIN = {
 let sess, feed = [], pending = new Map(), seenEv = [], seenReid = [], prevHidden = new Map(), marks = [], prevMatch = [], idHist = [];
 
 function newSession() {
-  sess = new MotSession({ scenario: S.scenario, seed: S.seed, overrides: S.overrides, phd: true });
+  sess = new MotSession({ scenario: S.scenario, seed: S.seed, overrides: S.overrides, phd: true, lander: S.lander });
   S.sw = sess.runs.map(() => []);
   feed = []; pending = new Map(); seenEv = sess.runs.map(() => 0); seenReid = sess.runs.map(() => 0); prevHidden = new Map(); marks = []; prevMatch = sess.runs.map(() => new Map()); idHist = sess.runs.map(() => new Map());
   pushFeed(MOT_SCENARIOS[S.scenario].label, '');
@@ -214,6 +214,12 @@ function drawMap() {
   c.save(); c.translate(cx, cy + 10); c.fillStyle = '#c8ccd2'; c.fillRect(-14, -7, 28, 14); c.fillStyle = '#2b2d33'; for (const wx of [-12, 0, 12]) for (const wy of [-9, 9]) { c.beginPath(); c.arc(wx, wy, 3, 0, TAU); c.fill(); } c.restore();
   c.fillStyle = '#4cc9f0'; c.beginPath(); c.arc(cx, cy, 4, 0, TAU); c.fill();
   c.fillStyle = '#e6edf7'; c.font = '12px system-ui'; c.fillText('Rover camera', cx + 20, cy + 14);
+  if (w.lander) {                                    // second camera: position and field of view
+    const L = w.lander, [lx, ly] = P(L.x, L.y), a0 = L.th - L.fov / 2, a1 = L.th + L.fov / 2;
+    c.strokeStyle = '#ffd16699'; c.setLineDash([4, 4]); c.lineWidth = 1.2; c.beginPath(); c.moveTo(lx, ly);
+    c.lineTo(...P(L.x + 40 * Math.cos(a0), L.y + 40 * Math.sin(a0))); c.moveTo(lx, ly); c.lineTo(...P(L.x + 40 * Math.cos(a1), L.y + 40 * Math.sin(a1))); c.stroke(); c.setLineDash([]);
+    c.fillStyle = '#ffd166'; c.fillRect(lx - 6, ly - 6, 12, 12); c.fillText('Lander camera', lx - 90, ly + 4);
+  }
   // true people
   const r = Math.max(7, 0.5 * s);
   if (S.showTruth) for (const t of w.targets) {
@@ -374,6 +380,7 @@ function wire() {
   $('cards').onclick = (e) => { const el = e.target.closest('.tcard'); if (!el) return; S.sel = +el.dataset.i; buildCards(); updateCards(); };
   $('optTruth').onchange = (e) => { S.showTruth = e.target.checked; };
   $('optHeat').onchange = (e) => { S.heat = e.target.checked; };
+  $('optLander').onchange = (e) => { S.lander = e.target.checked; newSession(); pushFeed(S.lander ? 'Lander camera on: two viewpoints' : 'Lander camera off', ''); };
 
   // collapsible side panels, remembered per page
   const KEY = 'panels:' + location.pathname;
@@ -417,7 +424,8 @@ const TRACK_TOUR = (api) => [
   { at: '#cards', title: '4 · Four trackers', text: 'Same camera data. The first three differ only in how they treat a missed detection; <b>Re-ID</b> also recognises people by their suit-stripe colours. <b>Same ID after short / long hide</b>: e.g. 3 / 4 means 3 of 4 people who hid came back with their old number; higher is better. <b>ID switches</b>: lower is better.', action: { label: 'Show the naive tracker', run: () => api.showNaive() } },
   { at: '#who', title: '5 · People', text: 'One row per real person. <b>Now</b>: their ID, <b>#11?</b> if hidden but still remembered, <b>lost</b> if the tracker gave up. <b>IDs so far</b> lists every number the tracker gave them. One number = never lost. Each extra number is one ID switch (✘).' },
   { at: '#feed', title: '6 · What happened', text: '"P3 behind rock", then "P3 back (4 s)" with ✔ (same ID) or ✘ (new ID) for each tracker: <b>NI</b> = Aware + neg. info, then Aware, then Naive, in their card colours.' },
-  { at: '#scenario', title: '7 · Shadows', text: 'At the lunar south pole the sun is low and shadows are long. People in shadow are in view but too dark to detect.', action: { label: '🌑 Switch to South pole', run: () => api.polar() } },
+  { at: '#optHeat', title: '7 · Heat map and lander', text: 'The <b>glow</b> is a second, independent estimate: where anyone could be. It pools behind rocks when someone hides (a miss where the camera cannot see is no evidence they left). Tick <b>Lander camera</b> for a second viewpoint from 6 m: people hidden from the rover are often visible to it.' },
+  { at: '#scenario', title: '8 · Shadows', text: 'At the lunar south pole the sun is low and shadows are long. People in shadow are in view but too dark to detect.', action: { label: '🌑 Switch to South pole', run: () => api.polar() } },
   { at: null, title: 'Go deeper', text: '<b>What if…?</b> (sidebar) changes the world. <b>📘 Guide</b> explains each idea: plain words, maths, code, paper.' },
 ];
 

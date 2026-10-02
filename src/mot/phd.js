@@ -20,35 +20,41 @@ export class ParticlePHD {
     this.W = world; this.n = n; this.rng = new RNG(seed * 31 + 7);
     this.X = new Float64Array(0); this.w = new Float64Array(0); this.pending = null;
     this.ps = 0.995; this.birthMass = 0.03; this.sigA = 0.9; this.dt = world.dt;
-    // detection-probability grid for the (fixed) camera
-    const cam = world.cam, cfg = world.cfg, sun = cfg.shadows ? world.sun : null;
+    // detection-probability grid per (fixed) camera: the rover's, and the lander's if there is one
+    const cfg = world.cfg, sun = cfg.shadows ? world.sun : null;
+    this.cams = [world.cam, world.lander].filter(Boolean);
     this.gw = Math.round((GX1 - GX0) / GS); this.gh = Math.round((GY1 - GY0) / GS);
-    this.pd = new Float32Array(this.gw * this.gh);
-    for (let j = 0; j < this.gh; j++) for (let i = 0; i < this.gw; i++) {
-      const x = GX0 + (i + 0.5) * GS, y = GY0 + (j + 0.5) * GS, v = visibility(cam, world.boulders, x, y, cam.targetR);
-      if (!v.inFov) continue;
-      this.pd[j * this.gw + i] = detectionProb(true, v.visFrac, cfg.pd, sun ? shadowFraction(world.boulders, x, y, sun) : 0);
-    }
+    this.grids = this.cams.map((cam) => {
+      const G = new Float32Array(this.gw * this.gh);
+      for (let j = 0; j < this.gh; j++) for (let i = 0; i < this.gw; i++) {
+        const x = GX0 + (i + 0.5) * GS, y = GY0 + (j + 0.5) * GS, v = visibility(cam, world.boulders, x, y, world.cam.targetR);
+        if (!v.inFov) continue;
+        G[j * this.gw + i] = detectionProb(true, v.visFrac, cfg.pd, sun ? shadowFraction(world.boulders, x, y, sun) : 0);
+      }
+      return G;
+    });
   }
 
-  pdAt(x, y) {
+  pdAt(x, y, ci = 0) {
     const i = Math.floor((x - GX0) / GS), j = Math.floor((y - GY0) / GS);
-    return i < 0 || j < 0 || i >= this.gw || j >= this.gh ? 0 : this.pd[j * this.gw + i];
+    return i < 0 || j < 0 || i >= this.gw || j >= this.gh ? 0 : this.grids[ci][j * this.gw + i];
   }
 
-  _births(dets) {
-    const cam = this.W.cam, m = 40, X = [], w = [];
+  _births(dets, cam, ci) {
+    const m = 40, X = [], w = [];
     for (const z of dets) for (let k = 0; k < m; k++) {
       const r = z.range + sigRange(cam, z.range) * this.rng.randn(), b = z.bearing + cam.sigB * 2 * this.rng.randn();
       const x = cam.x + r * Math.cos(b), y = cam.y + r * Math.sin(b);
       X.push(x, y, 0.6 * this.rng.randn(), 0.6 * this.rng.randn());
-      w.push((this.birthMass / m) * this.pdAt(x, y) / this.W.cfg.pd);     // unseeable spot => it was a false alarm
+      w.push((this.birthMass / m) * this.pdAt(x, y, ci) / this.W.cfg.pd);     // unseeable spot => it was a false alarm
     }
     return [X, w];
   }
 
-  step(dets) {
-    const dt = this.dt, cam = this.W.cam, r = this.rng;
+  /** frames: [{cam, dets}] (one per camera), or just the rover's dets array. */
+  step(frames) {
+    if (!frames.length || frames[0].cam === undefined) frames = [{ cam: this.W.cam, dets: frames }];
+    const dt = this.dt, r = this.rng;
     // predict
     let X = Array.from(this.X), w = Array.from(this.w);
     for (let i = 0; i < w.length; i++) {
@@ -59,27 +65,30 @@ export class ParticlePHD {
       w[i] *= this.ps;
     }
     if (this.pending) { X = X.concat(this.pending[0]); w = w.concat(this.pending[1]); }
-    this.pending = this._births(dets);                        // used from the next frame (never updated twice)
-    // update
-    const N = w.length, pd = new Float64Array(N), rr = new Float64Array(N), br = new Float64Array(N);
-    for (let i = 0; i < N; i++) {
-      const x = X[4 * i], y = X[4 * i + 1]; pd[i] = this.pdAt(x, y);
-      rr[i] = Math.hypot(x - cam.x, y - cam.y); br[i] = Math.atan2(y - cam.y, x - cam.x);
-    }
-    const kappa = this.W.cfg.clutter / (cam.fov * (cam.range - 4)), sb = cam.sigB * Math.SQRT2 + 0.002;
-    const gain = new Float64Array(N); for (let i = 0; i < N; i++) gain[i] = 1 - pd[i];
-    const num = new Float64Array(N);
-    for (const z of dets) {
-      let den = kappa;
+    this.pending = [[], []];                                  // births: used from the next frame (never updated twice)
+    frames.forEach((f, ci) => { const [bx, bw] = this._births(f.dets, f.cam, this.cams.indexOf(f.cam) >= 0 ? this.cams.indexOf(f.cam) : ci); this.pending[0].push(...bx); this.pending[1].push(...bw); });
+    // update, one camera at a time (each with its own visibility)
+    const N = w.length, pd = new Float64Array(N), rr = new Float64Array(N), br = new Float64Array(N), gain = new Float64Array(N), num = new Float64Array(N);
+    frames.forEach((f, fi) => {
+      const cam = f.cam, ci = this.cams.indexOf(cam) >= 0 ? this.cams.indexOf(cam) : fi;
       for (let i = 0; i < N; i++) {
-        if (pd[i] === 0) { num[i] = 0; continue; }
-        const sr = sigRange(cam, rr[i]), a = (z.range - rr[i]) / sr, b = wrapAngle(z.bearing - br[i]) / sb;
-        num[i] = a * a + b * b > 40 ? 0 : pd[i] * Math.exp(-0.5 * (a * a + b * b)) / (2 * Math.PI * sr * sb);
-        den += num[i] * w[i];
+        const x = X[4 * i], y = X[4 * i + 1]; pd[i] = this.pdAt(x, y, ci);
+        rr[i] = Math.hypot(x - cam.x, y - cam.y); br[i] = Math.atan2(y - cam.y, x - cam.x); gain[i] = 1 - pd[i];
       }
-      for (let i = 0; i < N; i++) gain[i] += num[i] / den;
-    }
-    let mass = 0; for (let i = 0; i < N; i++) { w[i] *= gain[i]; mass += w[i]; }
+      const kappa = this.W.cfg.clutter / (cam.fov * (cam.range - 4)), sb = cam.sigB * Math.SQRT2 + 0.002;
+      for (const z of f.dets) {
+        let den = kappa;
+        for (let i = 0; i < N; i++) {
+          if (pd[i] === 0) { num[i] = 0; continue; }
+          const sr = sigRange(cam, rr[i]), a = (z.range - rr[i]) / sr, b = wrapAngle(z.bearing - br[i]) / sb;
+          num[i] = a * a + b * b > 40 ? 0 : pd[i] * Math.exp(-0.5 * (a * a + b * b)) / (2 * Math.PI * sr * sb);
+          den += num[i] * w[i];
+        }
+        for (let i = 0; i < N; i++) gain[i] += num[i] / den;
+      }
+      for (let i = 0; i < N; i++) w[i] *= gain[i];
+    });
+    let mass = 0; for (let i = 0; i < N; i++) mass += w[i];
     // systematic resampling back to n particles, keeping the total mass
     this.X = new Float64Array(4 * this.n); this.w = new Float64Array(this.n);
     if (!(mass > 0)) { this.X = new Float64Array(0); this.w = new Float64Array(0); return; }

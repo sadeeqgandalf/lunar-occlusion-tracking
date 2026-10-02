@@ -148,11 +148,49 @@ export class Tracker {
     return true;
   }
 
-  /** Process one frame of detections ({range, bearing}). */
-  step(dets) {
-    const p = this.p;
+  /** Process one frame of detections ({range, bearing}) from this tracker's own camera. */
+  step(dets) { this.stepFrames([{ cam: this.cam, dets }]); }
+
+  /**
+   * One frame from one or more cameras: a single prediction, then a gated update per camera using THAT camera's
+   * visibility-based detection probability, then deletions and births. With one camera this is exactly the original
+   * single-camera step (verified against the MATLAB and Python ports).
+   */
+  stepFrames(frames) {
+    const p = this.p, home = this.cam;
     this.t += this.dt;
-    for (const t of this.tracks) { this._predict(t); t.age++; t.pdExp = this.expectedPd(t); t.hidden = t.pdExp < 0.3; }
+    for (const t of this.tracks) { this._predict(t); t.age++; t.seenNow = false; t._pdMax = 0; }
+    const left = [];
+    for (const f of frames) { this.cam = f.cam; left.push(this._update(f.dets)); }
+    this.cam = home;
+    for (const t of this.tracks) if (!t.seenNow) t.lastSeen++;
+
+    const keep = [];
+    for (const t of this.tracks) {
+      if (t.r >= p.rDelete && Math.sqrt(Math.max(t.P.get(0, 0), t.P.get(1, 1))) <= p.maxSigma) keep.push(t);
+      else if (this.reid && t.confirmed && t.feat) this.gallery.push({ id: t.id, feat: t.feat, x: t.x[0], y: t.x[1], t: this.t });
+    }
+    this.tracks = keep;
+    if (this.reid) this.gallery = this.gallery.filter((g) => this.t - g.t <= p.reidMemory);
+    // births only from detections that fall outside every surviving track's gate (prevents duplicate tracks)
+    const born = [];
+    left.forEach((L, ci) => {
+      this.cam = L.cam;
+      L.dets.forEach((d, j) => {
+        if (L.used.has(j) || L.gated[j]) return;
+        const x = L.cam.x + d.range * Math.cos(d.bearing), y = L.cam.y + d.range * Math.sin(d.bearing);
+        if (born.some((b) => b.ci !== ci && Math.hypot(b.x - x, b.y - y) < 2)) return;   // another camera already started them
+        if (this.reid && d.feat && this._reidentify(d)) return;
+        this._birth(d); born.push({ ci, x, y });
+      });
+    });
+    this.cam = home;
+  }
+
+  /** Associate and update with one camera's detections (this.cam = that camera). */
+  _update(dets) {
+    const p = this.p;
+    for (const t of this.tracks) { t.pdExp = this.expectedPd(t); t._pdMax = Math.max(t._pdMax ?? 0, t.pdExp); t.hidden = t._pdMax < 0.3; }
     const kappa = p.clutter / (this.cam.fov * (this.cam.range - 4)); // clutter density per (m x rad)
 
     // Likelihood-ratio assignment with an explicit "missed" option per track (track-score form used by JPDA/MHT):
@@ -190,31 +228,17 @@ export class Tracker {
         t.P = IKH.mul(t.P).mul(IKH.T()).add(K.mul(m.R).mul(K.T())).sym();
         const pdH = Math.max(t.pdExp, 0.02);
         t.r = (t.r * (pdH * g[i][j] + (1 - pdH) * kappa)) / (t.r * pdH * g[i][j] + (1 - t.r * pdH) * kappa);
-        t.hits++; t.lastSeen = 0;
+        t.hits++; t.lastSeen = 0; t.seenNow = true;
         if (!t.confirmed && t.r >= p.rConfirm && t.hits >= 3) t.confirmed = true;
         if (this.reid && d.feat) t.feat = t.feat ? t.feat.map((v, k) => 0.85 * v + 0.15 * d.feat[k]) : d.feat.slice();
-      } else { // missed: Bayes existence update with the EXPECTED detection probability
+      } else { // missed by this camera: Bayes existence update with ITS expected detection probability
         const pd = t.pdExp;
-        t.r = (t.r * (1 - pd)) / (1 - t.r * pd); t.lastSeen++;
+        t.r = (t.r * (1 - pd)) / (1 - t.r * pd);
         if (this.negInfo) this._missUpdate(t);
       }
     });
-
-    const gated = (j) => cost.some((row) => row[j] < FORBID);
-    const keep = [];
-    for (const t of this.tracks) {
-      if (t.r >= p.rDelete && Math.sqrt(Math.max(t.P.get(0, 0), t.P.get(1, 1))) <= p.maxSigma) keep.push(t);
-      else if (this.reid && t.confirmed && t.feat) this.gallery.push({ id: t.id, feat: t.feat, x: t.x[0], y: t.x[1], t: this.t });
-    }
-    this.tracks = keep;
-    if (this.reid) this.gallery = this.gallery.filter((g) => this.t - g.t <= p.reidMemory);
-    // births only from detections that fall outside every surviving track's gate (prevents duplicate tracks)
-    dets.forEach((d, j) => {
-      if (used.has(j)) return;
-      if (gated(j)) return;
-      if (this.reid && d.feat && this._reidentify(d)) return;
-      this._birth(d);
-    });
+    const gated = dets.map((_, j) => cost.some((row) => row[j] < FORBID));
+    return { cam: this.cam, dets, used, gated };
   }
 
   confirmed() { return this.tracks.filter((t) => t.confirmed); }

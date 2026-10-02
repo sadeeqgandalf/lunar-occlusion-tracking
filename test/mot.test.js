@@ -142,3 +142,14 @@ test('PHD heat map: expected number of people tracks the truth, and it is fast',
   assert.ok(med > 3.5 && med < 7, `median expected people ${med} (truth 5)`);
   const h = s.phd.density(); assert.ok(h.D.some((v) => v > 0.02), 'density has mass');
 });
+
+test('lander camera: two viewpoints cut ID switches, and single-camera results are unchanged', async () => {
+  const { MotSession } = await import('../src/mot/session.js');
+  const one = new MotSession({ scenario: 'boulders', seed: 8 }).run(240).summaries();
+  const two = new MotSession({ scenario: 'boulders', seed: 8, lander: true, phd: true }).run(240);
+  const s2 = two.summaries();
+  assert.ok(s2[0].idsw < one[0].idsw, `NI with lander ${s2[0].idsw} vs rover only ${one[0].idsw}`);
+  assert.ok(two.phd.expectedCount > 2 && two.phd.expectedCount < 9, `PHD expects ${two.phd.expectedCount}`);
+  const again = new MotSession({ scenario: 'boulders', seed: 8 }).run(240).summaries();
+  assert.deepEqual(again.map((r) => r.idsw), one.map((r) => r.idsw));
+});

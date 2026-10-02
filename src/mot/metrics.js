@@ -20,7 +20,8 @@ export class MotMetrics {
 
   update(world, tracker) {
     const T = world.t;
-    const vis = world.targets.filter((t) => t.vis.inFov && !isHidden(t.vis));
+    const V = (t) => t.visFused ?? t.vis;           // with a lander: hidden only if hidden from BOTH cameras
+    const vis = world.targets.filter((t) => V(t).inFov && !isHidden(V(t)));
     const rep = tracker.reported(), F = world.frame;
     this.f++; this.gtCount += vis.length; this.predCount += rep.length;
     const d = (g, k) => Math.hypot(g.x - k.x[0], g.y - k.x[1]);
@@ -53,11 +54,11 @@ export class MotMetrics {
 
     // --- occlusion events
     for (const g of world.targets) {
-      const hiddenNow = isHidden(g.vis), visibleNow = g.vis.inFov && !hiddenNow;
+      const hiddenNow = isHidden(V(g)), visibleNow = V(g).inFov && !hiddenNow;
       let o = this.occ.get(g.id) || { state: 'idle' };
       if (o.state === 'idle' && hiddenNow && this.lastMatch.has(g.id) && o.lastVisibleMatched >= F - 5) o = { state: 'hidden', since: T, before: this.lastMatch.get(g.id) };
       else if (o.state === 'hidden') {
-        if (!g.vis.inFov) o = { state: 'idle' };                       // walked out of view: not an occlusion
+        if (!V(g).inFov) o = { state: 'idle' };                       // walked out of view: not an occlusion
         else if (visibleNow) o = T - o.since >= MIN_OCC ? { state: 'reacq', since: T, before: o.before, dur: T - o.since } : { state: 'idle' };
         else { // still hidden: is the coasting track alive and honest?
           this.hiddenFrames++;
@@ -72,7 +73,7 @@ export class MotMetrics {
       } else if (o.state === 'reacq') {
         const m = match.get(g.id);
         if (m) { this.events.push({ t: T, target: g.id, dur: o.dur, kept: m.id === o.before }); o = { state: 'idle' }; }
-        else if (T - o.since > REACQ || !g.vis.inFov) { this.events.push({ t: T, target: g.id, dur: o.dur, kept: false }); o = { state: 'idle' }; }
+        else if (T - o.since > REACQ || !V(g).inFov) { this.events.push({ t: T, target: g.id, dur: o.dur, kept: false }); o = { state: 'idle' }; }
       }
       if (visibleNow && match.has(g.id)) o.lastVisibleMatched = F;
       this.occ.set(g.id, o);
