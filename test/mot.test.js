@@ -153,3 +153,18 @@ test('lander camera: two viewpoints cut ID switches, and single-camera results a
   const again = new MotSession({ scenario: 'boulders', seed: 8 }).run(240).summaries();
   assert.deepEqual(again.map((r) => r.idsw), one.map((r) => r.idsw));
 });
+
+test('lidar: sees in polar shadow, so adding it to the camera cuts ID switches; camera-only results unchanged', async () => {
+  const { MotSession } = await import('../src/mot/session.js');
+  let cam = 0, fused = 0;
+  for (const seed of [3, 5]) {
+    cam += new MotSession({ scenario: 'polar', seed }).run(240).summaries()[0].idsw;
+    fused += new MotSession({ scenario: 'polar', seed, lidar: true }).run(240).summaries()[0].idsw;
+  }
+  assert.ok(fused < cam, `Aware+NI ID switches: camera ${cam}, camera + lidar ${fused}`);
+  const { sensorPd } = await import('../src/mot/occlusion.js');
+  const { LIDAR } = await import('../src/mot/world.js');
+  const v = { inFov: true, visFrac: 1, range: 20 };
+  assert.equal(sensorPd(LIDAR, v, 0.95, 1), LIDAR.pd);                 // full shadow: lidar unaffected
+  assert.ok(sensorPd(null, v, 0.95, 1) < 0.25);                        // ... the camera is not
+});

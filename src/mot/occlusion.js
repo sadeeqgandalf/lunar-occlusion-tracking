@@ -84,6 +84,21 @@ export function detectionProb(inFov, visFrac, pdMax, shadowFrac = 0) {
   return pdMax * Math.min(1, (visFrac - 0.25) / 0.45) * (1 - 0.8 * shadowFrac);
 }
 
+/**
+ * Detection probability for a given sensor.
+ *  passive camera (default): needs light, so cast shadow cuts it (detectionProb above).
+ *  active lidar (sensor.active): brings its own light, so no shadow penalty; but a far person returns fewer points,
+ *  so it fades linearly from full at sensor.fullRange to zero at sensor.range. Both need line of sight past rocks.
+ */
+export function sensorPd(sensor, v, pdDefault, shadowFrac = 0) {
+  if (sensor && sensor.active) {
+    if (!v.inFov || v.visFrac < 0.25) return 0;
+    const rf = v.range <= sensor.fullRange ? 1 : Math.max(0, 1 - (v.range - sensor.fullRange) / (sensor.range - sensor.fullRange));
+    return sensor.pd * Math.min(1, (v.visFrac - 0.25) / 0.45) * rf;
+  }
+  return detectionProb(v.inFov, v.visFrac, sensor?.pd ?? pdDefault, shadowFrac);
+}
+
 /** "Hidden" for scoring and display: in view of the camera's field, but effectively undetectable. */
 export const isHidden = (v) => v.inFov && (v.pd ?? (v.visFrac >= 0.25 ? 1 : 0)) < 0.15;
 

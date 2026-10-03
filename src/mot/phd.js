@@ -10,7 +10,7 @@
 // For speed in the browser P_D is precomputed once on a 0.5 m ground grid (the camera and rocks never move).
 import { RNG } from '../core/rng.js';
 import { wrapAngle } from '../core/linalg.js';
-import { visibility, detectionProb, shadowFraction } from './occlusion.js';
+import { visibility, sensorPd, shadowFraction } from './occlusion.js';
 import { sigRange } from './world.js';
 
 const GX0 = -50, GX1 = 50, GY0 = -6, GY1 = 60, GS = 0.5;
@@ -22,14 +22,14 @@ export class ParticlePHD {
     this.ps = 0.995; this.birthMass = 0.03; this.sigA = 0.9; this.dt = world.dt;
     // detection-probability grid per (fixed) camera: the rover's, and the lander's if there is one
     const cfg = world.cfg, sun = cfg.shadows ? world.sun : null;
-    this.cams = [world.cam, world.lander].filter(Boolean);
+    this.cams = [world.cam, world.lander, world.lidar].filter(Boolean);
     this.gw = Math.round((GX1 - GX0) / GS); this.gh = Math.round((GY1 - GY0) / GS);
     this.grids = this.cams.map((cam) => {
       const G = new Float32Array(this.gw * this.gh);
       for (let j = 0; j < this.gh; j++) for (let i = 0; i < this.gw; i++) {
         const x = GX0 + (i + 0.5) * GS, y = GY0 + (j + 0.5) * GS, v = visibility(cam, world.boulders, x, y, world.cam.targetR);
         if (!v.inFov) continue;
-        G[j * this.gw + i] = detectionProb(true, v.visFrac, cfg.pd, sun ? shadowFraction(world.boulders, x, y, sun) : 0);
+        G[j * this.gw + i] = sensorPd(cam, v, cfg.pd, sun && !cam.active ? shadowFraction(world.boulders, x, y, sun) : 0);
       }
       return G;
     });
@@ -46,7 +46,7 @@ export class ParticlePHD {
       const r = z.range + sigRange(cam, z.range) * this.rng.randn(), b = z.bearing + cam.sigB * 2 * this.rng.randn();
       const x = cam.x + r * Math.cos(b), y = cam.y + r * Math.sin(b);
       X.push(x, y, 0.6 * this.rng.randn(), 0.6 * this.rng.randn());
-      w.push((this.birthMass / m) * this.pdAt(x, y, ci) / this.W.cfg.pd);     // unseeable spot => it was a false alarm
+      w.push((this.birthMass / m) * this.pdAt(x, y, ci) / (cam.pd ?? this.W.cfg.pd));     // unseeable spot => it was a false alarm
     }
     return [X, w];
   }
@@ -75,7 +75,7 @@ export class ParticlePHD {
         const x = X[4 * i], y = X[4 * i + 1]; pd[i] = this.pdAt(x, y, ci);
         rr[i] = Math.hypot(x - cam.x, y - cam.y); br[i] = Math.atan2(y - cam.y, x - cam.x); gain[i] = 1 - pd[i];
       }
-      const kappa = this.W.cfg.clutter / (cam.fov * (cam.range - 4)), sb = cam.sigB * Math.SQRT2 + 0.002;
+      const kappa = (cam.clutter ?? this.W.cfg.clutter) / (cam.fov * (cam.range - 4)), sb = cam.sigB * Math.SQRT2 + 0.002;
       for (const z of f.dets) {
         let den = kappa;
         for (let i = 0; i < N; i++) {

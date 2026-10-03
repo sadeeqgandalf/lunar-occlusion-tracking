@@ -43,5 +43,5 @@ end
 function [lo, hi] = wilson(k, n)
 if n == 0, lo = NaN; hi = NaN; return; end
 z = 1.96; p = k/n; d = 1 + z^2/n; c = (p + z^2/(2*n))/d; h = z*sqrt(p*(1-p)/n + z^2/(4*n^2))/d;
-lo = c - h; hi = c + h;
+lo = max(0, c - h); hi = min(1, c + h);
 end

@@ -17,7 +17,7 @@
 // So a miss on a track predicted to be hidden carries (almost) no evidence that the object is gone.
 import { Mat, wrapAngle } from '../core/linalg.js';
 import { hungarian } from './hungarian.js';
-import { visibility, detectionProb, shadowFraction } from './occlusion.js';
+import { visibility, sensorPd, shadowFraction } from './occlusion.js';
 import { sigRange } from './world.js';
 import { RNG } from '../core/rng.js';
 import { cosine } from './appearance.js';
@@ -61,8 +61,8 @@ export class Tracker {
     for (const z of Z) {
       const x = t.x.slice();
       for (let r = 0; r < 4; r++) for (let c = 0; c <= r; c++) x[r] += L.get(r, c) * z[c];
-      const v = visibility(this.cam, this.boulders, x[0], x[1], this.cam.targetR);
-      pts.push({ x, pd: detectionProb(v.inFov, v.visFrac, this.p.pd, this.sun ? shadowFraction(this.boulders, x[0], x[1], this.sun) : 0) });
+      const v = visibility(this.cam, this.boulders, x[0], x[1], this.cam.targetR);   // per sensor: camera or lidar
+      pts.push({ x, pd: sensorPd(this.cam, v, this.p.pd, this.sun && !this.cam.active ? shadowFraction(this.boulders, x[0], x[1], this.sun) : 0) });
     }
     return pts;
   }
@@ -87,9 +87,32 @@ export class Tracker {
   _meas(t) { // predicted range/bearing, Jacobian, innovation covariance pieces
     const cam = this.cam, dx = t.x[0] - cam.x, dy = t.x[1] - cam.y, q = dx * dx + dy * dy, rr = Math.sqrt(q);
     const H = Mat.from([[dx / rr, dy / rr, 0, 0], [-dy / q, dx / q, 0, 0]]);
-    const R = Mat.diag([sigRange(cam, rr) ** 2, cam.sigB ** 2 * 2]); // bearing variance inflated for partial-occlusion jitter
+    // bearing variance inflated for partial-occlusion jitter; cam.modelInflate (lidar) widens the model to cover the
+    // centroid shift of a partly hidden person, which a very precise sensor would otherwise reject as impossible
+    const k = cam.modelInflate ?? 1;
+    const R = Mat.diag([(k * sigRange(cam, rr)) ** 2, (k * cam.sigB) ** 2 * 2]);
     const S = H.mul(t.P).mul(H.T()).add(R);
     return { zh: [rr, Math.atan2(dy, dx)], H, R, S, Si: S.inv() };
+  }
+
+  /** Negative information from every sensor that missed the track this frame (all of them, since it was not seen). */
+  _missUpdateFused(t, cams) {
+    const pts = t._missPts; t._missPts = null; t._missCams = 0;
+    if (!pts) return;
+    if (cams.length > 1) {                                           // combine: weight 1 - P_D,s(x) for every sensor
+      const home = this.cam;
+      for (const q of pts) {
+        let keep = 1;
+        for (const c of cams) {
+          this.cam = c;
+          const v = visibility(c, this.boulders, q.x[0], q.x[1], c.targetR);
+          keep *= 1 - sensorPd(c, v, this.p.pd, this.sun && !c.active ? shadowFraction(this.boulders, q.x[0], q.x[1], this.sun) : 0);
+        }
+        q.pd = 1 - keep;                                              // treat as one combined detection probability
+      }
+      this.cam = home;
+    }
+    t._pts = pts; this._missUpdate(t);
   }
 
   /** Negative information: moment-match p(x)(1 - P_D(x)) using the samples drawn for this frame. */
@@ -159,11 +182,15 @@ export class Tracker {
   stepFrames(frames) {
     const p = this.p, home = this.cam;
     this.t += this.dt;
-    for (const t of this.tracks) { this._predict(t); t.age++; t.seenNow = false; t._pdMax = 0; }
+    for (const t of this.tracks) { this._predict(t); t.age++; t.seenNow = false; t._pdMax = 0; t._missPts = null; t._missCams = 0; }
     const left = [];
     for (const f of frames) { this.cam = f.cam; left.push(this._update(f.dets)); }
     this.cam = home;
     for (const t of this.tracks) if (!t.seenNow) t.lastSeen++;
+    // negative information only for a person EVERY sensor missed: p(x | all missed) ∝ p(x) Π_s (1 - P_D,s(x)).
+    // (Applying one sensor's miss before another sensor's hit would push the estimate into a blind zone that the
+    // second sensor can see into.) With one sensor this is exactly the single-sensor update.
+    if (this.negInfo) for (const t of this.tracks) if (!t.seenNow) this._missUpdateFused(t, frames.map((f) => f.cam));
 
     const keep = [];
     for (const t of this.tracks) {
@@ -173,15 +200,22 @@ export class Tracker {
     this.tracks = keep;
     if (this.reid) this.gallery = this.gallery.filter((g) => this.t - g.t <= p.reidMemory);
     // births only from detections that fall outside every surviving track's gate (prevents duplicate tracks)
+    // A person seen by several sensors must start (or be re-identified as) ONE track: a detection that falls inside the
+    // gate of a track another sensor started or reclaimed this frame is that same person (the gate uses each
+    // detection's own sensor model, so a camera's large range error far away is accounted for).
     const born = [];
+    const sameAsBorn = (d, ci) => born.some((b) => {
+      if (b.ci === ci) return false;
+      const m = this._meas(b.t), y0 = d.range - m.zh[0], y1 = wrapAngle(d.bearing - m.zh[1]);
+      return y0 * (m.Si.get(0, 0) * y0 + m.Si.get(0, 1) * y1) + y1 * (m.Si.get(1, 0) * y0 + m.Si.get(1, 1) * y1) <= p.gate;
+    });
     left.forEach((L, ci) => {
       this.cam = L.cam;
       L.dets.forEach((d, j) => {
         if (L.used.has(j) || L.gated[j]) return;
-        const x = L.cam.x + d.range * Math.cos(d.bearing), y = L.cam.y + d.range * Math.sin(d.bearing);
-        if (born.some((b) => b.ci !== ci && Math.hypot(b.x - x, b.y - y) < 2)) return;   // another camera already started them
-        if (this.reid && d.feat && this._reidentify(d)) return;
-        this._birth(d); born.push({ ci, x, y });
+        if (left.length > 1 && sameAsBorn(d, ci)) return;
+        if (this.reid && d.feat && this._reidentify(d)) { born.push({ ci, t: this.tracks[this.tracks.length - 1] }); return; }
+        born.push({ ci, t: this._birth(d) });
       });
     });
     this.cam = home;
@@ -191,7 +225,7 @@ export class Tracker {
   _update(dets) {
     const p = this.p;
     for (const t of this.tracks) { t.pdExp = this.expectedPd(t); t._pdMax = Math.max(t._pdMax ?? 0, t.pdExp); t.hidden = t._pdMax < 0.3; }
-    const kappa = p.clutter / (this.cam.fov * (this.cam.range - 4)); // clutter density per (m x rad)
+    const kappa = (this.cam.clutter ?? p.clutter) / (this.cam.fov * (this.cam.range - 4)); // clutter density per (m x rad), per sensor
 
     // Likelihood-ratio assignment with an explicit "missed" option per track (track-score form used by JPDA/MHT):
     //   take detection j:  cost = -log( P_D,i g_ij / kappa )      miss:  cost = -log( 1 - P_D,i P_G )
@@ -231,10 +265,11 @@ export class Tracker {
         t.hits++; t.lastSeen = 0; t.seenNow = true;
         if (!t.confirmed && t.r >= p.rConfirm && t.hits >= 3) t.confirmed = true;
         if (this.reid && d.feat) t.feat = t.feat ? t.feat.map((v, k) => 0.85 * v + 0.15 * d.feat[k]) : d.feat.slice();
-      } else { // missed by this camera: Bayes existence update with ITS expected detection probability
+      } else { // missed by this sensor: Bayes existence update with ITS expected detection probability
         const pd = t.pdExp;
         t.r = (t.r * (1 - pd)) / (1 - t.r * pd);
-        if (this.negInfo) this._missUpdate(t);
+        if (!t._missPts) t._missPts = t._pts;                       // samples of the predicted state (first sensor)
+        t._missCams = (t._missCams || 0) + 1;
       }
     });
     const gated = dets.map((_, j) => cost.some((row) => row[j] < FORBID));

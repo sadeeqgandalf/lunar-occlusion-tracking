@@ -5,8 +5,8 @@ import { MotMetrics } from './metrics.js';
 import { ParticlePHD } from './phd.js';
 
 export class MotSession {
-  constructor({ scenario = 'boulders', seed = 7, overrides = {}, trackerParams = {}, phd = false, lander = false } = {}) {
-    this.world = new MotWorld(scenario, seed, overrides, { lander });
+  constructor({ scenario = 'boulders', seed = 7, overrides = {}, trackerParams = {}, phd = false, lander = false, lidar = false } = {}) {
+    this.world = new MotWorld(scenario, seed, overrides, { lander, lidar });
     const W = this.world, pd = W.cfg.pd, clutter = W.cfg.clutter, sun = W.cfg.shadows ? W.sun : null;
     // Ablation: identical trackers except for how they treat occlusion; the 4th also recognises people by appearance.
     this.runs = [
@@ -25,6 +25,7 @@ export class MotSession {
     this.last = { dets, gt };
     const frames = [{ cam: W.cam, dets }];
     if (W.lander) { const L = W.senseLander(); this.last.ldets = L.dets; this.last.lgt = L.gt; frames.push({ cam: W.lander, dets: L.dets }); }
+    if (W.lidar) { const D = W.senseLidar(); this.last.ddets = D.dets; this.last.dgt = D.gt; frames.push({ cam: W.lidar, dets: D.dets }); }
     if (this.phd) this.phd.step(frames);
     for (const r of this.runs) {
       // trackers never see identities; only the re-ID tracker gets each detection's colour signature

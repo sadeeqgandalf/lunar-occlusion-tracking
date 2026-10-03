@@ -1,7 +1,7 @@
 // Lunar-surface scene: a rover mast camera watches astronauts / rovers walking among boulders.
 import { RNG } from '../core/rng.js';
 import { clamp, wrapAngle } from '../core/linalg.js';
-import { visibility, detectionProb, shadowFraction } from './occlusion.js';
+import { visibility, detectionProb, shadowFraction, sensorPd } from './occlusion.js';
 import { personSignature, clutterSignature } from './appearance.js';
 
 export const MOT_SCENARIOS = {
@@ -17,12 +17,18 @@ export const CAMERA = {
   sigR0: 0.08, sigRk: 0.0012,        // stereo depth noise: sigR = sigR0 + sigRk * r^2  [m]
   imgW: 960, imgH: 300, targetH: 1.8, targetR: 0.4,
 };
+// 3-D scanning lidar on the rover mast: 16 laser channels swept over 140 deg. Active sensor: works in darkness.
+// Centroid of a person's returns: ~5 cm in range, ~0.17 deg in bearing; fewer false alarms than the camera.
+export const LIDAR = { x: 0, y: -4, h: 2.0, th: Math.PI / 2, fov: (140 * Math.PI) / 180, range: 45, fullRange: 32, active: true,
+  pd: 0.97, clutter: 0.3, sigB: 0.003, sigR0: 0.05, sigRk: 0.00002, imgW: 960, imgH: 300, targetH: 1.8, targetR: 0.4,
+  modelInflate: 2,   // tracker's noise model x2: covers the centroid shift of a partly hidden person (else precise returns get gated out)
+  channels: 16, elevMin: (-25 * Math.PI) / 180, elevMax: (3 * Math.PI) / 180, azStep: (0.5 * Math.PI) / 180 };
 export const LANDER = { x: 24, y: 46, h: 6, fov: (90 * Math.PI) / 180, range: 60 };   // lander camera, 6 m up
 export const LANDER_AIM = { x: 0, y: 18 };                                             // ... aimed at the worksite
 export const sigRange = (cam, r) => cam.sigR0 + cam.sigRk * r * r;
 
 export class MotWorld {
-  constructor(scenario = 'boulders', seed = 7, overrides = {}, { lander = false } = {}) {
+  constructor(scenario = 'boulders', seed = 7, overrides = {}, { lander = false, lidar = false } = {}) {
     this.cfg = { ...MOT_SCENARIOS[scenario] || MOT_SCENARIOS.boulders, ...overrides };
     this.id = scenario; this.seed = seed;
     this.cam = { ...CAMERA };
@@ -37,6 +43,8 @@ export class MotWorld {
     // rover's detections, and every single-camera result, are unchanged)
     this.lander = lander ? { ...CAMERA, ...LANDER, th: Math.atan2(LANDER_AIM.y - LANDER.y, LANDER_AIM.x - LANDER.x) } : null;
     if (lander) { this.lrng = new RNG(seed * 6151 + 11); this.larng = new RNG(seed * 3313 + 29); }
+    this.lidar = lidar ? { ...LIDAR } : null;                 // own random stream too
+    if (lidar) this.drng = new RNG(seed * 2711 + 13);
     this._placeBoulders(); this._spawnTargets();
   }
 
@@ -92,7 +100,7 @@ export class MotWorld {
         if (d < b.r + 0.4) { t.x = b.x + (dx / d) * (b.r + 0.4); t.y = b.y + (dy / d) * (b.r + 0.4); }
       }
       t.vis = this.view(t.x, t.y);
-      if (this.lander) this._fuse(t);
+      if (this.lander || this.lidar) this._fuse(t);
       if (this.frame % 3 === 0) { t.trail.push([t.x, t.y]); if (t.trail.length > 120) t.trail.shift(); }
     }
     this.t += dt; this.frame++;
@@ -100,16 +108,18 @@ export class MotWorld {
 
   /** With a lander: what it sees of person t, and the fused view used for scoring (hidden = hidden from BOTH cameras). */
   _fuse(t) {
-    t.visL = this.view(t.x, t.y, this.lander);
-    const a = t.vis, b = t.visL;
-    t.visFused = { inFov: a.inFov || b.inFov, pd: Math.max(a.inFov ? a.pd : 0, b.inFov ? b.pd : 0), visFrac: Math.max(a.visFrac, b.visFrac), shadow: a.shadow };
+    const views = [t.vis];
+    if (this.lander) views.push(t.visL = this.view(t.x, t.y, this.lander));
+    if (this.lidar) views.push(t.visD = this.view(t.x, t.y, this.lidar));
+    t.visFused = { inFov: views.some((v) => v.inFov), pd: Math.max(...views.map((v) => (v.inFov ? v.pd : 0))),
+      visFrac: Math.max(...views.map((v) => v.visFrac)), shadow: t.vis.shadow };
   }
 
   /** What a camera can see of a person at (x, y): geometry, optional cast-shadow darkness, and detection probability. */
   view(x, y, cam = this.cam) {
     const v = visibility(cam, this.boulders, x, y, this.cam.targetR);
     v.shadow = this.cfg.shadows ? shadowFraction(this.boulders, x, y, this.sun) : 0;
-    v.pd = detectionProb(v.inFov, v.visFrac, this.cfg.pd, v.shadow);
+    v.pd = sensorPd(cam, v, this.cfg.pd, cam.active ? 0 : v.shadow);   // the lidar brings its own light
     return v;
   }
 
@@ -120,23 +130,25 @@ export class MotWorld {
   sense() { return this._sense(this.cam, 'vis', this.srng, this.arng); }
   /** The lander camera's frame (same detector model, its own viewpoint and random streams). */
   senseLander() { return this._sense(this.lander, 'visL', this.lrng, this.larng); }
+  /** The lidar's frame: centroids of person-shaped point clusters. No colour, so no appearance signature. */
+  senseLidar() { return this._sense(this.lidar, 'visD', this.drng, null); }
 
   _sense(cam, field, s, as) {
     const dets = [], gt = [];
-    if (field === 'visL') for (const t of this.targets) if (!t.visL) this._fuse(t);
+    if (field !== 'vis') for (const t of this.targets) if (!t[field]) this._fuse(t);
     for (const t of this.targets) {
       const v = t[field] || this.view(t.x, t.y, cam);
       if (s.next() >= v.pd) continue;
       const sr = sigRange(cam, v.range);
       const sb = cam.sigB * (v.visFrac < 0.9 ? 2 : 1);  // partially hidden: centroid jitters more
       dets.push(this._det(v.range + sr * s.randn(), v.visCenter + sb * s.randn(), cam));
-      dets[dets.length - 1].feat = personSignature(t.id, v.visFrac, v.shadow ?? 0, as);   // colour signature
+      if (as) dets[dets.length - 1].feat = personSignature(t.id, v.visFrac, v.shadow ?? 0, as);   // colour signature (cameras only)
       gt.push(t.id);
     }
-    const nFalse = poisson(this.cfg.clutter, s);
+    const nFalse = poisson(cam.clutter ?? this.cfg.clutter, s);
     for (let k = 0; k < nFalse; k++) {
       dets.push(this._det(s.uniform(4, cam.range), cam.th + s.uniform(-cam.fov / 2, cam.fov / 2), cam));
-      dets[dets.length - 1].feat = clutterSignature(as);
+      if (as) dets[dets.length - 1].feat = clutterSignature(as);
       gt.push(0);
     }
     return { dets, gt };
