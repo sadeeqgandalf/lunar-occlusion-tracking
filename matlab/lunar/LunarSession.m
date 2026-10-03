@@ -10,7 +10,7 @@ classdef LunarSession < handle
             arguments
                 scenario (1,1) string = "boulders"
                 seed (1,1) double = 7
-                opts.Toolbox (1,1) string {mustBeMember(opts.Toolbox, ["none" "aware" "both"])} = "none"
+                opts.Toolbox (1,1) string {mustBeMember(opts.Toolbox, ["none" "aware" "both" "all"])} = "none"
                 opts.Overrides struct = struct()
             end
             o.world = LunarWorld(scenario, seed, opts.Overrides);
@@ -27,6 +27,14 @@ classdef LunarSession < handle
             end
             if opts.Toolbox == "both"
                 o.runs(end+1) = struct('tracker', ToolboxGNN(W, prm, false), 'metrics', MotMetrics(numel(W.targets)));
+            end
+            if opts.Toolbox == "all"                     % every MathWorks multi-object tracker that fits: plain and told visibility
+                o.runs = o.runs(1:3);
+                for kind = ["gnn" "jipda" "tomht"]
+                    for aw = [false true]
+                        o.runs(end+1) = struct('tracker', ToolboxTracker(W, prm, kind, aw), 'metrics', MotMetrics(numel(W.targets)));
+                    end
+                end
             end
         end
         function step(o)
