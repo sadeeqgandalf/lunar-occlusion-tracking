@@ -122,7 +122,7 @@ to 90%. Without awareness it backfires (Naive, above).
 
 ### Step 5 · Lidar: "I bring my own light"
 
-**What changes.** A 16-beam scanning lidar on the rover mast (140°, 45 m). It is an active sensor, so the shadow
+**What changes.** A 64-beam scanning lidar on the rover mast (140°, 45 m). It is an active sensor, so the shadow
 penalty does not apply: `P_D = 0.97 · visibility`, fading from 32 m to 45 m as returns thin out. Its centroids are
 precise (about 5 cm), it has fewer false alarms, and it has no colour. It is fused like the lander. Two fusion
 lessons were needed to make it help rather than hurt:

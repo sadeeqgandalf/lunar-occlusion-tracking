@@ -12,7 +12,7 @@ The lab runs in **real-time 3-D** (Three.js/WebGL) with **official NASA 3-D mode
 npm start                                   # zero dependencies, Node >= 18
 open http://localhost:8080/track.html       # Occlusion Tracking Lab
 open http://localhost:8080                  # Navigation lab (EKF/UKF/PF mission control)
-npm test                                    # 32 tests
+npm test                                    # 43 tests
 node experiments/occlusion_ablation.mjs     # regenerates experiments/results.md (20 seeds x 3 scenarios, ~2 min)
 ```
 

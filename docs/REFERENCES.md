@@ -17,6 +17,17 @@ Every method in this repository traces to the literature below. Entries marked �
 | R9 | A. Bewley, Z. Ge, L. Ott, F. Ramos, B. Upcroft. **Simple online and realtime tracking (SORT).** *ICIP* 2016. | The "Kalman filter + Hungarian assignment" baseline family our tracker belongs to. |
 | R10 ✓ | J. Cao, J. Pang, X. Weng, R. Khirodkar, K. Kitani. **Observation-Centric SORT: rethinking SORT for robust multi-object tracking.** *CVPR* 2023, 9686–9696. [open access](https://openaccess.thecvf.com/content/CVPR2023/html/Cao_Observation-Centric_SORT_Rethinking_SORT_for_Robust_Multi-Object_Tracking_CVPR_2023_paper.html) | Related approach to the same problem: error accumulates during occlusion under linear motion. Planned comparison (roadmap). |
 
+## Trackers we compare against (MathWorks Sensor Fusion and Tracking Toolbox)
+
+`trackerGNN`, `trackerJPDA` (JIPDA with `TrackLogic='Integrated'`) and `trackerTOMHT` run on our detections through `matlab/lunar/ToolboxTracker.m`. Checked against publisher or index records on 2026-10-05.
+
+| # | Reference | Used for (code) |
+|---|---|---|
+| C1 ✓ | T. E. Fortmann, Y. Bar-Shalom, M. Scheffe. **Sonar tracking of multiple targets using joint probabilistic data association.** *IEEE Journal of Oceanic Engineering* 8(3):173–184, 1983. | JPDA: soft association over every nearby detection; basis of `trackerJPDA`. |
+| C2 ✓ | D. Musicki, R. Evans. **Joint integrated probabilistic data association: JIPDA.** *IEEE Transactions on Aerospace and Electronic Systems* 40(3):1093–1099, 2004. | JPDA with track existence. With our visibility-based `P_D` it is the strongest motion-only tracker in `matlab/lunar/results_toolbox.md`. |
+| C3 ✓ | D. B. Reid. **An algorithm for tracking multiple targets.** *IEEE Transactions on Automatic Control* 24(6):843–854, 1979. doi:10.1109/TAC.1979.1102177 | Multiple hypothesis tracking (MHT). |
+| C4 ✓ | T. Kurien. **Issues in the design of practical multitarget tracking algorithms.** In Y. Bar-Shalom (ed.), *Multitarget-Multisensor Tracking: Advanced Applications*, Artech House, 1990. | Track-oriented MHT, the variant behind `trackerTOMHT`. |
+
 ## Evaluation
 
 | # | Reference | Used for (code) |
