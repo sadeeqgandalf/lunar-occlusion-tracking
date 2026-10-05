@@ -6,6 +6,7 @@ import { THREE, toV, hash, fbm, makeRenderer, fitRenderer, loadModel, starfield,
 import { OrbitControls } from '../../vendor/three/examples/jsm/controls/OrbitControls.js';
 import { isHidden, hiddenCause } from '../mot/occlusion.js';
 import { idColor, stripeOf, label, personName } from './idcolor.js';
+import { lidarScan, turbo } from '../mot/lidarscan.js';
 
 const MAST_H = 2.2, PERSON_H = 1.8;
 
@@ -139,42 +140,23 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
   const getPool = (kind, make) => { const i = (pool[kind].used = (pool[kind].used || 0) + 1) - 1; if (!pool[kind][i]) { pool[kind][i] = make(); dyn.add(pool[kind][i]); } pool[kind][i].visible = true; return pool[kind][i]; };
   const resetPools = () => { for (const k of Object.keys(pool)) { pool[k].used = 0; for (const m of pool[k]) m.visible = false; } };
 
-  // ---- 3-D lidar: cast the real beams (16 channels x 0.5 deg over 140 deg) against ground, rocks and people
+  // ---- 3-D lidar: the real beams, cast in src/mot/lidarscan.js; here turned into a point cloud and a range image
   let lidarPts = null; const rangeCv = document.createElement('canvas');
-  const turbo = (t) => { t = Math.min(1, Math.max(0, t)); return [Math.max(0, Math.min(1, 1.6 * t - 0.2 + 0.5 * Math.sin(3.1 * t))), Math.max(0, Math.sin(Math.PI * t)), Math.max(0, Math.min(1, 1.2 - 1.6 * t))]; };
-  function lidarScan(w) {
-    const L = w.lidar, ox = L.x, oy = L.y, oz = L.h, nAz = Math.round(L.fov / L.azStep) + 1, nEl = L.channels;
-    const pts = [], cols = [], img = new Float32Array(nAz * nEl), who = new Int16Array(nAz * nEl);
-    for (let e = 0; e < nEl; e++) {
-      const el = L.elevMax - (e * (L.elevMax - L.elevMin)) / (nEl - 1), ce = Math.cos(el), dz = Math.sin(el);
-      for (let a = 0; a < nAz; a++) {
-        const az = L.th + L.fov / 2 - a * L.azStep, dx = ce * Math.cos(az), dy = ce * Math.sin(az);
-        let best = dz < 0 ? -oz / dz : Infinity, hit = 0;                       // ground (flat in the work area)
-        for (const b of w.boulders) {                                            // half-buried ellipsoid rocks
-          const h = b.h ?? 1e6, px = (ox - b.x) / b.r, py = (oy - b.y) / b.r, pz = oz / h, qx = dx / b.r, qy = dy / b.r, qz = dz / h;
-          const A = qx * qx + qy * qy + qz * qz, B = 2 * (px * qx + py * qy + pz * qz), C = px * px + py * py + pz * pz - 1, D = B * B - 4 * A * C;
-          if (D > 0) { const t = (-B - Math.sqrt(D)) / (2 * A); if (t > 0 && t < best) { best = t; hit = -1; } }
-        }
-        for (const p of w.targets) {                                             // people: upright cylinders, 1.8 m
-          const fx = ox - p.x, fy = oy - p.y, A = dx * dx + dy * dy, B = 2 * (fx * dx + fy * dy), C = fx * fx + fy * fy - 0.28 * 0.28, D = B * B - 4 * A * C;
-          if (D > 0) { const t = (-B - Math.sqrt(D)) / (2 * A), z = oz + t * dz; if (t > 0 && t < best && z > 0 && z < 1.8) { best = t; hit = p.id; } }
-        }
-        if (!(best < L.range)) continue;
-        const x = ox + best * dx, y = oy + best * dy, z = oz + best * dz;
-        img[e * nAz + a] = best; who[e * nAz + a] = hit;
-        if (hit === 0 && (a + e) % 2) continue;                                   // thin out ground returns for clarity
-        const v = toV(x, y, Math.max(z, 0) + 0.03); pts.push(v.x, v.y, v.z);
-        const c = hit > 0 ? [1, 0.95, 0.55] : turbo(best / L.range).map((q) => q * (hit < 0 ? 0.9 : 0.6));
-        cols.push(...c);
-      }
+  function lidarCloud(w) {
+    const s = lidarScan(w), pts = [], cols = [], R = s.ret;
+    for (let k = 0; k < R.length; k += 6) {
+      const hit = R[k + 3]; if (hit === 0 && (R[k + 4] % 3 || R[k + 5] % 2)) continue;   // thin out ground returns
+      const v = toV(R[k], R[k + 1], R[k + 2] + 0.03); pts.push(v.x, v.y, v.z);
+      cols.push(...(hit > 0 ? [1, 0.95, 0.55] : turbo(Math.hypot(R[k] - w.lidar.x, R[k + 1] - w.lidar.y) / w.lidar.range).map((q) => q * (hit < 0 ? 0.9 : 0.6))));
     }
-    return { pts, cols, img, who, nAz, nEl };
+    return { ...s, pts, cols };
   }
   function drawRangeImage(scan, range) {
     rangeCv.width = scan.nAz; rangeCv.height = scan.nEl;
     const g = rangeCv.getContext('2d'), im = g.createImageData(scan.nAz, scan.nEl);
     for (let k = 0; k < scan.img.length; k++) {
-      const r = scan.img[k], c = r ? (scan.who[k] > 0 ? [1, 0.95, 0.55] : turbo(r / range)) : [0.03, 0.03, 0.05];
+      // shade by distance, rocks a little brighter than ground (surface facing the sensor), people bright yellow
+      const r = scan.img[k], c = r ? (scan.who[k] > 0 ? [1, 0.93, 0.45] : turbo(r / range).map((q) => q * (scan.who[k] < 0 ? 1 : 0.72))) : [0.02, 0.02, 0.04];
       im.data[4 * k] = 255 * c[0]; im.data[4 * k + 1] = 255 * c[1]; im.data[4 * k + 2] = 255 * c[2]; im.data[4 * k + 3] = 255;
     }
     g.putImageData(im, 0, 0); return rangeCv;
@@ -201,7 +183,7 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
     resetPools(); updateHeat(heat);
     let scan = null;
     if (sess.world.lidar) {
-      scan = lidarScan(sess.world);
+      scan = lidarCloud(sess.world);
       if (!lidarPts) {
         lidarPts = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({ size: 0.11, vertexColors: true, sizeAttenuation: true, transparent: true, opacity: 0.95, depthWrite: false }));
         lidarPts.renderOrder = 5; dyn.add(lidarPts);
@@ -290,12 +272,14 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
         c2.restore();
       }
     }
-    if (scan) {                                         // lidar range image panel: rows = laser channels, colour = distance
-      const c2 = ov.getContext('2d'), x0 = (1 - pw) * camEl.clientWidth, wd = pw * camEl.clientWidth, hd = camEl.clientHeight;
-      c2.save(); c2.fillStyle = '#05060a'; c2.fillRect(x0, 0, wd, hd); c2.imageSmoothingEnabled = false;
-      const ih = Math.min(hd - 40, wd * 0.5); c2.drawImage(drawRangeImage(scan, w.lidar.range), x0 + 6, 32, wd - 12, ih);
-      c2.font = 'bold 11px system-ui'; c2.fillStyle = '#0a0e16cc'; c2.fillRect(x0 + 8, 8, 168, 20); c2.fillStyle = '#7fe3ff'; c2.fillText('LIDAR RANGE IMAGE · 16 beams', x0 + 15, 22);
-      c2.font = '10.5px system-ui'; c2.fillStyle = '#9aa3b2'; c2.fillText('near ← colour → far · bright yellow = a person · works in darkness', x0 + 10, 32 + ih + 14);
+    if (scan) {                                         // lidar panel: the range image, rows = laser channels
+      const c2 = ov.getContext('2d'), x0 = (1 - pw) * camEl.clientWidth, wd = pw * camEl.clientWidth, hd = camEl.clientHeight, L = w.lidar;
+      c2.save(); c2.fillStyle = '#05060a'; c2.fillRect(x0, 0, wd, hd);
+      c2.imageSmoothingEnabled = true; c2.imageSmoothingQuality = 'high';
+      c2.drawImage(drawRangeImage(scan, L.range), x0 + 8, 30, wd - 16, hd - 52);
+      c2.font = 'bold 11px system-ui'; c2.fillStyle = '#7fe3ff'; c2.fillText(`LIDAR RANGE IMAGE · ${L.channels} beams · 140°`, x0 + 10, 21);
+      c2.font = '10px system-ui'; c2.fillStyle = '#9aa3b2';
+      c2.fillText('← left · direction · right →    rows: laser beams (top = highest)    colour: near → far · yellow = person', x0 + 10, hd - 8);
       c2.fillStyle = '#ffffff55'; c2.fillRect(x0, 0, 1.5, hd); c2.restore();
     }
     for (const p of people.values()) p.visible = showTruth;

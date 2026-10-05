@@ -17,12 +17,12 @@ export const CAMERA = {
   sigR0: 0.08, sigRk: 0.0012,        // stereo depth noise: sigR = sigR0 + sigRk * r^2  [m]
   imgW: 960, imgH: 300, targetH: 1.8, targetR: 0.4,
 };
-// 3-D scanning lidar on the rover mast: 16 laser channels swept over 140 deg. Active sensor: works in darkness.
+// 3-D scanning lidar on the rover mast: 64 laser channels swept over 140 deg. Active sensor: works in darkness.
 // Centroid of a person's returns: ~5 cm in range, ~0.17 deg in bearing; fewer false alarms than the camera.
 export const LIDAR = { x: 0, y: -4, h: 2.0, th: Math.PI / 2, fov: (140 * Math.PI) / 180, range: 45, fullRange: 32, active: true,
   pd: 0.97, clutter: 0.3, sigB: 0.003, sigR0: 0.05, sigRk: 0.00002, imgW: 960, imgH: 300, targetH: 1.8, targetR: 0.4,
   modelInflate: 2,   // tracker's noise model x2: covers the centroid shift of a partly hidden person (else precise returns get gated out)
-  channels: 16, elevMin: (-25 * Math.PI) / 180, elevMax: (3 * Math.PI) / 180, azStep: (0.5 * Math.PI) / 180 };
+  channels: 64, elevMin: (-25 * Math.PI) / 180, elevMax: (4 * Math.PI) / 180, azStep: (0.25 * Math.PI) / 180 };
 export const LANDER = { x: 24, y: 46, h: 6, fov: (90 * Math.PI) / 180, range: 60 };   // lander camera, 6 m up
 export const LANDER_AIM = { x: 0, y: 18 };                                             // ... aimed at the worksite
 export const sigRange = (cam, r) => cam.sigR0 + cam.sigRk * r * r;

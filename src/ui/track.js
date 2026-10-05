@@ -7,6 +7,7 @@ import { isHidden, hiddenCause } from '../mot/occlusion.js';
 import { runTour } from './tour.js';
 import { lineChart } from './charts.js';
 import { idColor, idColorA, stripeOf, label, labelConfirmed, personName } from './idcolor.js';
+import { lidarScan, turbo } from '../mot/lidarscan.js';
 
 const $ = (id) => document.getElementById(id);
 // default seed 8: a typical run (same ranking as the 20-seed average), not the best one (15) or the worst (7, 9, 16)
@@ -210,6 +211,20 @@ function drawMap() {
   c.restore();
   // boulders
   w.boulders.forEach((b, i) => { const [px, py] = P(b.x, b.y); drawRock(c, px, py, b.r * s, rockShape(b, i)); });
+  // lidar, seen from above: every return as a dot (colour = height), people as bright clusters, detections boxed
+  if (w.lidar) {
+    const sc = lidarScan(w), Rt = sc.ret;
+    for (let k = 0; k < Rt.length; k += 6) {
+      const hit = Rt[k + 3]; if (hit === 0 && (Rt[k + 4] % 2)) continue;
+      const [px, py] = P(Rt[k], Rt[k + 1]);
+      if (hit > 0) { c.fillStyle = '#ffe873'; c.fillRect(px - 1.5, py - 1.5, 3, 3); continue; }
+      const col = turbo(Math.min(1, (Rt[k + 2] + 0.2) / 3.2)).map((q) => Math.round(255 * q * (hit < 0 ? 1 : 0.6)));
+      c.fillStyle = `rgba(${col},${hit < 0 ? 0.9 : 0.55})`; c.fillRect(px - 0.7, py - 0.7, 1.4, 1.4);
+    }
+    c.strokeStyle = '#7fe3ff'; c.lineWidth = 1.4;
+    for (const d of sess.last.ddets || []) { const [px, py] = P(w.lidar.x + d.range * Math.cos(d.bearing), w.lidar.y + d.range * Math.sin(d.bearing)); c.strokeRect(px - 6, py - 6, 12, 12); }
+    c.fillStyle = '#7fe3ff'; c.font = '11px system-ui'; c.fillText('lidar returns from above · yellow = person · □ = lidar detection', 12, H - 12);
+  }
   // rover with camera mast
   c.save(); c.translate(cx, cy + 10); c.fillStyle = '#c8ccd2'; c.fillRect(-14, -7, 28, 14); c.fillStyle = '#2b2d33'; for (const wx of [-12, 0, 12]) for (const wy of [-9, 9]) { c.beginPath(); c.arc(wx, wy, 3, 0, TAU); c.fill(); } c.restore();
   c.fillStyle = '#4cc9f0'; c.beginPath(); c.arc(cx, cy, 4, 0, TAU); c.fill();
