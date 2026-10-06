@@ -136,7 +136,7 @@ lessons were needed to make it help rather than hurt:
 
 **Fixes.** Aware + NI with camera + lidar: 47.8 → 37.9 switches (boulders) and 51.3 → 36.3 under polar shadows.
 **Code.** `sensorPd` in `src/mot/occlusion.js`, `LIDAR` in `src/mot/world.js`, `_missUpdateFused` in `tracker.js`.
-The 3-D view casts the real beams for its point cloud and range image (`lidarScan` in `src/ui/world3d.js`).
+The 3-D view casts the real beams for its point cloud and sensor images (`lidarScan` in `src/mot/lidarscan.js`): a range image and a reflectivity image with surface shading, noise and dropouts. Each object in the image gets an instance mask found from the ranges alone (`segmentScan`; mean IoU 0.94 against the true person masks, 3 seeds), and each person mask takes the colour and ID of its track.
 
 ### Alongside: "where could anyone be?" (particle PHD filter)
 

@@ -66,5 +66,35 @@ function castScan(w) {
   return { ret, img, who, inten, nAz, nEl };
 }
 
+/** Instance segmentation of a scan, computed from the ranges alone (never from who[]): drop returns near the
+ *  ground plane, then grow connected regions over the range image. Two neighbouring pixels belong to the same object
+ *  when their ranges differ by less than `jump` (range-image clustering, as in Bogoslavskyi & Stachniss 2016).
+ *  Returns lab[k] = instance number (0 = ground / nothing) and one record per instance.
+ *  ponytail: fixed thresholds and flat ground; switch to a learned or angle-based criterion on real terrain. */
+export function segmentScan(scan, L, { jump = 0.4, minPts = 8, groundZ = 0.15 } = {}) {
+  const { img, nAz, nEl } = scan, lab = new Int16Array(img.length), inst = [], stack = [];
+  const elOf = (e) => L.elevMax - (e * (L.elevMax - L.elevMin)) / (nEl - 1);
+  const isObj = (k) => img[k] > 0 && L.h + img[k] * Math.sin(elOf((k / nAz) | 0)) > groundZ;
+  for (let s = 0; s < img.length; s++) {
+    if (lab[s] || !isObj(s)) continue;
+    const id = inst.length + 1; let n = 0, sx = 0, sy = 0, zmax = 0, a0 = nAz, a1 = 0, e0 = nEl, e1 = 0, rs = 0;
+    lab[s] = id; stack.push(s);
+    while (stack.length) {
+      const k = stack.pop(), a = k % nAz, e = (k / nAz) | 0, r = img[k], el = elOf(e), az = L.th + L.fov / 2 - a * L.azStep;
+      n++; rs += r; sx += L.x + r * Math.cos(el) * Math.cos(az); sy += L.y + r * Math.cos(el) * Math.sin(az); zmax = Math.max(zmax, L.h + r * Math.sin(el));
+      a0 = Math.min(a0, a); a1 = Math.max(a1, a); e0 = Math.min(e0, e); e1 = Math.max(e1, e);
+      // 4 neighbours, plus one pixel further along the row and column to bridge single dropouts
+      for (const [da, de] of [[1, 0], [-1, 0], [0, 1], [0, -1], [2, 0], [-2, 0], [0, 2], [0, -2]]) {
+        const a2 = a + da, e2 = e + de; if (a2 < 0 || a2 >= nAz || e2 < 0 || e2 >= nEl) continue;
+        const j = e2 * nAz + a2; if (!lab[j] && isObj(j) && Math.abs(img[j] - r) < jump) { lab[j] = id; stack.push(j); }
+      }
+    }
+    const range = rs / n, width = (a1 - a0 + 1) * L.azStep * range;
+    inst.push({ id, n, x: sx / n, y: sy / n, range, zmax, width, box: [a0, e0, a1, e1], small: n < minPts,
+      personLike: n >= minPts && zmax > 1.5 && zmax < 2.0 && width < 0.9 && (e1 - e0 + 1) * range * (L.elevMax - L.elevMin) / (nEl - 1) > 1.5 * width });   // head height, narrow, taller than wide
+  }
+  return { lab, inst };
+}
+
 /** A smooth "turbo-like" colour ramp for distances and heights. */
 export const turbo = (t) => { t = Math.min(1, Math.max(0, t)); return [Math.max(0, Math.min(1, 1.6 * t - 0.2 + 0.5 * Math.sin(3.1 * t))), Math.max(0, Math.sin(Math.PI * t)), Math.max(0, Math.min(1, 1.2 - 1.6 * t))]; };

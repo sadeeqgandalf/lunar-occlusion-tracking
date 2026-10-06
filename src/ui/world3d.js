@@ -6,7 +6,7 @@ import { THREE, toV, hash, fbm, makeRenderer, fitRenderer, loadModel, starfield,
 import { OrbitControls } from '../../vendor/three/examples/jsm/controls/OrbitControls.js';
 import { isHidden, hiddenCause } from '../mot/occlusion.js';
 import { idColor, stripeOf, label, personName } from './idcolor.js';
-import { lidarScan, turbo } from '../mot/lidarscan.js';
+import { lidarScan, segmentScan, turbo } from '../mot/lidarscan.js';
 
 const MAST_H = 2.2, PERSON_H = 1.8;
 
@@ -154,19 +154,21 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
   // Range strip colours, near -> far (bright = close), and the people's bounding boxes for the brackets.
   const RANGE_RAMP = [[1, 0.99, 0.78], [1, 0.72, 0.42], [0.93, 0.38, 0.38], [0.66, 0.2, 0.5], [0.35, 0.1, 0.5], [0.1, 0.05, 0.28]];
   const ramp = (t) => { t = Math.min(0.9999, Math.max(0, t)) * (RANGE_RAMP.length - 1); const i = Math.floor(t), f = t - i, p = RANGE_RAMP[i], q = RANGE_RAMP[i + 1]; return [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f, p[2] + (q[2] - p[2]) * f]; };
-  /** The scan as a sensor would report it: top half = range, bottom half = reflectivity (range-corrected signal). */
-  function drawRangeImage(scan, range) {
+  const ROCK_TINTS = [[0.36, 0.62, 0.78], [0.45, 0.55, 0.85], [0.33, 0.7, 0.68], [0.58, 0.56, 0.82], [0.4, 0.66, 0.6]];
+  const hexRgb = (h) => { const v = parseInt(h.slice(1), 16); return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255]; };
+  /** The scan as a sensor would report it: top half = range, bottom half = reflectivity, each object's pixels tinted
+   *  with its instance colour (tint[i] = rgb of instance i + 1, or null). The shading stays visible under the tint. */
+  function drawRangeImage(scan, range, lab, tint) {
     const { nAz, nEl } = scan; rangeCv.width = nAz; rangeCv.height = 2 * nEl;
-    const g = rangeCv.getContext('2d'), im = g.createImageData(nAz, 2 * nEl), boxes = new Map();
+    const g = rangeCv.getContext('2d'), im = g.createImageData(nAz, 2 * nEl);
     for (let k = 0; k < scan.img.length; k++) {
       const r = scan.img[k], c = r ? ramp(Math.sqrt(r / range)) : [0.012, 0.012, 0.022];       // sqrt: more contrast up close
-      const v = r ? Math.min(1, Math.pow(scan.inten[k] / 0.75, 0.5)) : 0.012, j = 4 * (k + nAz * nEl);
+      const v = r ? Math.min(1, Math.pow(scan.inten[k] / 0.75, 0.5)) : 0.012, j = 4 * (k + nAz * nEl), t = lab[k] ? tint[lab[k] - 1] : null;
       im.data[4 * k] = 255 * c[0]; im.data[4 * k + 1] = 255 * c[1]; im.data[4 * k + 2] = 255 * c[2]; im.data[4 * k + 3] = 255;
-      im.data[j] = 255 * v; im.data[j + 1] = 255 * v; im.data[j + 2] = 255 * Math.min(1, v * 1.04 + 0.01); im.data[j + 3] = 255;
-      const id = scan.who[k];
-      if (id > 0) { const x = k % nAz, y = (k / nAz) | 0, bb = boxes.get(id) || [x, y, x, y]; bb[0] = Math.min(bb[0], x); bb[1] = Math.min(bb[1], y); bb[2] = Math.max(bb[2], x); bb[3] = Math.max(bb[3], y); boxes.set(id, bb); }
+      const m = 0.3 + 0.7 * v;                                                                  // keep the surface shading under the colour
+      im.data[j] = 255 * (t ? 0.3 * v + 0.7 * t[0] * m : v); im.data[j + 1] = 255 * (t ? 0.3 * v + 0.7 * t[1] * m : v); im.data[j + 2] = 255 * (t ? 0.3 * v + 0.7 * t[2] * m : Math.min(1, v * 1.04 + 0.01)); im.data[j + 3] = 255;
     }
-    g.putImageData(im, 0, 0); return { cv: rangeCv, boxes: [...boxes.values()] };
+    g.putImageData(im, 0, 0); return rangeCv;
   }
 
   let heatMesh = null, heatTex = null;
@@ -279,22 +281,35 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
         c2.restore();
       }
     }
-    if (scan) {                                         // lidar panel: range strip over reflectivity strip, as lidar viewers show a scan
+    if (scan) {                                         // lidar panel: range strip over reflectivity + instance masks
       const c2 = ov.getContext('2d'), x0 = (1 - pw) * camEl.clientWidth, wd = pw * camEl.clientWidth, hd = camEl.clientHeight, L = w.lidar;
-      const { cv, boxes } = drawRangeImage(scan, L.range), ix = x0 + 8, iw = wd - 16, sh = (hd - 62) / 2, y1 = 28, y2 = y1 + sh + 6;
+      // instance segmentation from the ranges alone; a person-shaped instance takes the colour and ID of the nearest confirmed track
+      const seg = segmentScan(scan, L), TK = sess.runs[sel].tracker, tags = [];
+      const tint = seg.inst.map((o) => {
+        if (o.small) return null;
+        if (!o.personLike) return ROCK_TINTS[Math.abs(Math.round(o.x / 1.5) * 7 + Math.round(o.y / 1.5) * 13) % ROCK_TINTS.length];   // rocks do not move: colour by place, so it stays put
+        let best = null, bd = 1.5; for (const t of TK.tracks) { if (!t.confirmed) continue; const d = Math.hypot(t.x[0] - o.x, t.x[1] - o.y); if (d < bd) { bd = d; best = t; } }
+        const n = best ? label(TK, best.id) : 0, hex = best ? idColor(n) : '#e8ecf2'; tags.push({ o, hex, text: best ? `#${n}` : '?' });
+        return hexRgb(hex);
+      });
+      const cv = drawRangeImage(scan, L.range, seg.lab, tint), ix = x0 + 8, iw = wd - 16, sh = (hd - 62) / 2, y1 = 28, y2 = y1 + sh + 6;
       c2.save(); c2.fillStyle = '#05060a'; c2.fillRect(x0, 0, wd, hd);
       c2.imageSmoothingEnabled = true; c2.imageSmoothingQuality = 'high';
       c2.drawImage(cv, 0, 0, scan.nAz, scan.nEl, ix, y1, iw, sh); c2.drawImage(cv, 0, scan.nEl, scan.nAz, scan.nEl, ix, y2, iw, sh);
-      c2.strokeStyle = '#ffe873'; c2.lineWidth = 1.2;       // corner brackets round each person's returns
-      for (const [ax, ay, bx, by] of boxes) for (const yo of [y1, y2]) {
-        const l = ix + (ax / scan.nAz) * iw - 3, r = ix + ((bx + 1) / scan.nAz) * iw + 3, t = yo + (ay / scan.nEl) * sh - 3, b = yo + ((by + 1) / scan.nEl) * sh + 3, q = Math.min(6, (r - l) / 2, (b - t) / 2);
-        c2.beginPath(); for (const [cx, cy, sx, sy] of [[l, t, 1, 1], [r, t, -1, 1], [l, b, 1, -1], [r, b, -1, -1]]) { c2.moveTo(cx + sx * q, cy); c2.lineTo(cx, cy); c2.lineTo(cx, cy + sy * q); } c2.stroke();
+      c2.lineWidth = 1.2; c2.font = 'bold 9.5px system-ui';   // corner brackets + track ID on each person instance
+      for (const { o, hex, text } of tags) {
+        const [ax, ay, bx, by] = o.box; c2.strokeStyle = hex;
+        for (const yo of [y1, y2]) {
+          const l = ix + (ax / scan.nAz) * iw - 3, r = ix + ((bx + 1) / scan.nAz) * iw + 3, t = yo + (ay / scan.nEl) * sh - 3, b = yo + ((by + 1) / scan.nEl) * sh + 3, q = Math.min(6, (r - l) / 2, (b - t) / 2);
+          c2.beginPath(); for (const [cx, cy, sx, sy] of [[l, t, 1, 1], [r, t, -1, 1], [l, b, 1, -1], [r, b, -1, -1]]) { c2.moveTo(cx + sx * q, cy); c2.lineTo(cx, cy); c2.lineTo(cx, cy + sy * q); } c2.stroke();
+          if (yo === y2) { const tw = c2.measureText(text).width + 6, tx = Math.min(ix + iw - tw, Math.max(ix, (l + r - tw) / 2)); c2.fillStyle = hex; c2.fillRect(tx, t - 13, tw, 12); c2.fillStyle = '#0a0e16'; c2.fillText(text, tx + 3, t - 3.5); }
+        }
       }
       c2.font = 'bold 11px system-ui'; c2.fillStyle = '#7fe3ff'; c2.fillText(`LIDAR · ${L.channels} beams · 140° · 10 Hz`, x0 + 10, 19);
-      c2.font = '600 9.5px system-ui'; c2.fillStyle = '#0a0e16b0'; c2.fillRect(ix, y1, 46, 14); c2.fillRect(ix, y2, 78, 14);
-      c2.fillStyle = '#dfe6f0'; c2.fillText('RANGE', ix + 5, y1 + 10.5); c2.fillText('REFLECTIVITY', ix + 5, y2 + 10.5);
+      c2.font = '600 9.5px system-ui'; c2.fillStyle = '#0a0e16b0'; c2.fillRect(ix, y1, 46, 14); c2.fillRect(ix, y2, 172, 14);
+      c2.fillStyle = '#dfe6f0'; c2.fillText('RANGE', ix + 5, y1 + 10.5); c2.fillText('REFLECTIVITY + INSTANCE MASKS', ix + 5, y2 + 10.5);
       c2.font = '10px system-ui'; c2.fillStyle = '#9aa3b2';
-      c2.fillText('range: bright = near · reflectivity: how much laser light each surface returns · black = no return · ⌜ ⌟ = person', x0 + 10, hd - 9);
+      c2.fillText('one colour per object, found from the ranges alone · people take their track\u2019s ID colour · black = no return', x0 + 10, hd - 9);
       c2.fillStyle = '#ffffff55'; c2.fillRect(x0, 0, 1.5, hd); c2.restore();
     }
     for (const p of people.values()) p.visible = showTruth;

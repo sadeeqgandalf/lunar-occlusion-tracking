@@ -181,3 +181,20 @@ test('lidar scan image: suits return more light than regolith, far grazing groun
   const again = lidarScan({ ...w, lidar: w.lidar, boulders: w.boulders, targets: w.targets, frame: w.frame });   // new object: bypasses the cache
   assert.deepEqual(again.img, a.img);
 });
+
+test('lidar instance segmentation: masks found from the ranges alone overlap the true person masks (mean IoU > 0.85)', async () => {
+  const { lidarScan, segmentScan } = await import('../src/mot/lidarscan.js');
+  const sess = new MotSession({ scenario: 'boulders', seed: 2, lidar: true }); let sum = 0, n = 0, flagged = 0;
+  for (let f = 0; f < 30; f++) {
+    sess.run(1); const w = sess.world, sc = lidarScan(w), sg = segmentScan(sc, w.lidar), truth = new Map(), inter = new Map();
+    for (let k = 0; k < sc.img.length; k++) { const id = sc.who[k]; if (id <= 0) continue; truth.set(id, (truth.get(id) || 0) + 1); const l = sg.lab[k]; if (l) inter.set(`${id}:${l}`, (inter.get(`${id}:${l}`) || 0) + 1); }
+    for (const [id, tn] of truth) {
+      if (tn < 8) continue; let best = 0, bi = null;
+      for (const i of sg.inst) { const it = inter.get(`${id}:${i.id}`) || 0, iou = it / (tn + i.n - it); if (iou > best) { best = iou; bi = i; } }
+      sum += best; n++; if (bi?.personLike) flagged++;
+    }
+  }
+  assert.ok(n > 50, `enough visible people (${n})`);
+  assert.ok(sum / n > 0.85, `mean IoU ${(sum / n).toFixed(3)}`);
+  assert.ok(flagged / n > 0.9, `person-shaped flag recall ${(flagged / n).toFixed(2)}`);
+});
