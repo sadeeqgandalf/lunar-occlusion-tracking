@@ -168,3 +168,16 @@ test('lidar: sees in polar shadow, so adding it to the camera cuts ID switches; 
   assert.equal(sensorPd(LIDAR, v, 0.95, 1), LIDAR.pd);                 // full shadow: lidar unaffected
   assert.ok(sensorPd(null, v, 0.95, 1) < 0.25);                        // ... the camera is not
 });
+
+test('lidar scan image: suits return more light than regolith, far grazing ground drops out, a scan replays identically', async () => {
+  const { lidarScan } = await import('../src/mot/lidarscan.js');
+  const sess = new MotSession({ scenario: 'boulders', seed: 8, lidar: true }); sess.run(5);
+  const w = sess.world, a = lidarScan(w), mean = (f) => { let s = 0, n = 0; for (let k = 0; k < a.img.length; k++) if (a.img[k] && f(k)) { s += a.inten[k]; n++; } return n ? s / n : NaN; };
+  const suit = mean((k) => a.who[k] > 0), ground = mean((k) => a.who[k] === 0);
+  assert.ok(suit > 3 * ground, `suit ${suit} vs ground ${ground}`);
+  let far = 0; for (let k = 0; k < a.img.length; k++) if (a.who[k] === 0 && a.img[k] > 35) far++;
+  assert.equal(far, 0, 'dark ground at a grazing angle beyond 35 m should give no return');
+  assert.ok(a.ret.length / 6 > 5000, 'still a dense scan');
+  const again = lidarScan({ ...w, lidar: w.lidar, boulders: w.boulders, targets: w.targets, frame: w.frame });   // new object: bypasses the cache
+  assert.deepEqual(again.img, a.img);
+});

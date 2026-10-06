@@ -151,15 +151,22 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
     }
     return { ...s, pts, cols };
   }
+  // Range strip colours, near -> far (bright = close), and the people's bounding boxes for the brackets.
+  const RANGE_RAMP = [[1, 0.99, 0.78], [1, 0.72, 0.42], [0.93, 0.38, 0.38], [0.66, 0.2, 0.5], [0.35, 0.1, 0.5], [0.1, 0.05, 0.28]];
+  const ramp = (t) => { t = Math.min(0.9999, Math.max(0, t)) * (RANGE_RAMP.length - 1); const i = Math.floor(t), f = t - i, p = RANGE_RAMP[i], q = RANGE_RAMP[i + 1]; return [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f, p[2] + (q[2] - p[2]) * f]; };
+  /** The scan as a sensor would report it: top half = range, bottom half = reflectivity (range-corrected signal). */
   function drawRangeImage(scan, range) {
-    rangeCv.width = scan.nAz; rangeCv.height = scan.nEl;
-    const g = rangeCv.getContext('2d'), im = g.createImageData(scan.nAz, scan.nEl);
+    const { nAz, nEl } = scan; rangeCv.width = nAz; rangeCv.height = 2 * nEl;
+    const g = rangeCv.getContext('2d'), im = g.createImageData(nAz, 2 * nEl), boxes = new Map();
     for (let k = 0; k < scan.img.length; k++) {
-      // shade by distance, rocks a little brighter than ground (surface facing the sensor), people bright yellow
-      const r = scan.img[k], c = r ? (scan.who[k] > 0 ? [1, 0.93, 0.45] : turbo(r / range).map((q) => q * (scan.who[k] < 0 ? 1 : 0.72))) : [0.02, 0.02, 0.04];
+      const r = scan.img[k], c = r ? ramp(Math.sqrt(r / range)) : [0.012, 0.012, 0.022];       // sqrt: more contrast up close
+      const v = r ? Math.min(1, Math.pow(scan.inten[k] / 0.75, 0.5)) : 0.012, j = 4 * (k + nAz * nEl);
       im.data[4 * k] = 255 * c[0]; im.data[4 * k + 1] = 255 * c[1]; im.data[4 * k + 2] = 255 * c[2]; im.data[4 * k + 3] = 255;
+      im.data[j] = 255 * v; im.data[j + 1] = 255 * v; im.data[j + 2] = 255 * Math.min(1, v * 1.04 + 0.01); im.data[j + 3] = 255;
+      const id = scan.who[k];
+      if (id > 0) { const x = k % nAz, y = (k / nAz) | 0, bb = boxes.get(id) || [x, y, x, y]; bb[0] = Math.min(bb[0], x); bb[1] = Math.min(bb[1], y); bb[2] = Math.max(bb[2], x); bb[3] = Math.max(bb[3], y); boxes.set(id, bb); }
     }
-    g.putImageData(im, 0, 0); return rangeCv;
+    g.putImageData(im, 0, 0); return { cv: rangeCv, boxes: [...boxes.values()] };
   }
 
   let heatMesh = null, heatTex = null;
@@ -272,14 +279,22 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
         c2.restore();
       }
     }
-    if (scan) {                                         // lidar panel: the range image, rows = laser channels
+    if (scan) {                                         // lidar panel: range strip over reflectivity strip, as lidar viewers show a scan
       const c2 = ov.getContext('2d'), x0 = (1 - pw) * camEl.clientWidth, wd = pw * camEl.clientWidth, hd = camEl.clientHeight, L = w.lidar;
+      const { cv, boxes } = drawRangeImage(scan, L.range), ix = x0 + 8, iw = wd - 16, sh = (hd - 62) / 2, y1 = 28, y2 = y1 + sh + 6;
       c2.save(); c2.fillStyle = '#05060a'; c2.fillRect(x0, 0, wd, hd);
       c2.imageSmoothingEnabled = true; c2.imageSmoothingQuality = 'high';
-      c2.drawImage(drawRangeImage(scan, L.range), x0 + 8, 30, wd - 16, hd - 52);
-      c2.font = 'bold 11px system-ui'; c2.fillStyle = '#7fe3ff'; c2.fillText(`LIDAR RANGE IMAGE · ${L.channels} beams · 140°`, x0 + 10, 21);
+      c2.drawImage(cv, 0, 0, scan.nAz, scan.nEl, ix, y1, iw, sh); c2.drawImage(cv, 0, scan.nEl, scan.nAz, scan.nEl, ix, y2, iw, sh);
+      c2.strokeStyle = '#ffe873'; c2.lineWidth = 1.2;       // corner brackets round each person's returns
+      for (const [ax, ay, bx, by] of boxes) for (const yo of [y1, y2]) {
+        const l = ix + (ax / scan.nAz) * iw - 3, r = ix + ((bx + 1) / scan.nAz) * iw + 3, t = yo + (ay / scan.nEl) * sh - 3, b = yo + ((by + 1) / scan.nEl) * sh + 3, q = Math.min(6, (r - l) / 2, (b - t) / 2);
+        c2.beginPath(); for (const [cx, cy, sx, sy] of [[l, t, 1, 1], [r, t, -1, 1], [l, b, 1, -1], [r, b, -1, -1]]) { c2.moveTo(cx + sx * q, cy); c2.lineTo(cx, cy); c2.lineTo(cx, cy + sy * q); } c2.stroke();
+      }
+      c2.font = 'bold 11px system-ui'; c2.fillStyle = '#7fe3ff'; c2.fillText(`LIDAR · ${L.channels} beams · 140° · 10 Hz`, x0 + 10, 19);
+      c2.font = '600 9.5px system-ui'; c2.fillStyle = '#0a0e16b0'; c2.fillRect(ix, y1, 46, 14); c2.fillRect(ix, y2, 78, 14);
+      c2.fillStyle = '#dfe6f0'; c2.fillText('RANGE', ix + 5, y1 + 10.5); c2.fillText('REFLECTIVITY', ix + 5, y2 + 10.5);
       c2.font = '10px system-ui'; c2.fillStyle = '#9aa3b2';
-      c2.fillText('← left · direction · right →    rows: laser beams (top = highest)    colour: near → far · yellow = person', x0 + 10, hd - 8);
+      c2.fillText('range: bright = near · reflectivity: how much laser light each surface returns · black = no return · ⌜ ⌟ = person', x0 + 10, hd - 9);
       c2.fillStyle = '#ffffff55'; c2.fillRect(x0, 0, 1.5, hd); c2.restore();
     }
     for (const p of people.values()) p.visible = showTruth;
