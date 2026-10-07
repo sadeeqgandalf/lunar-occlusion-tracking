@@ -11,7 +11,7 @@ import { lidarScan, turbo } from '../mot/lidarscan.js';
 
 const $ = (id) => document.getElementById(id);
 // default seed 8: a typical run (same ranking as the 20-seed average), not the best one (15) or the worst (7, 9, 16)
-const S = { heat: true, lander: false, lidar: false, scenario: 'boulders', seed: 8, speed: 2, paused: false, sel: 3, showTruth: true, view: '3d', overrides: {}, sw: [] };
+const S = { heat: true, lander: false, lidar: false, eyes: 'camera', scenario: 'boulders', seed: 8, speed: 2, paused: false, sel: 3, showTruth: true, view: '3d', overrides: {}, sw: [] };
 let w3d = null, w3dLost = null; // w3dLost: a 3-D view waiting for the browser to restore its GPU context
 const COLORS = ['#4ade80', '#4cc9f0', '#ff6b6b', '#bd8cff'];
 const PLAIN = {
@@ -23,7 +23,7 @@ const PLAIN = {
 let sess, feed = [], pending = new Map(), seenEv = [], seenReid = [], prevHidden = new Map(), marks = [], prevMatch = [], idHist = [];
 
 function newSession() {
-  sess = new MotSession({ scenario: S.scenario, seed: S.seed, overrides: S.overrides, phd: true, lander: S.lander, lidar: S.lidar });
+  sess = new MotSession({ scenario: S.scenario, seed: S.seed, overrides: S.overrides, phd: true, lander: S.lander, lidar: S.lidar, eyes: S.eyes });
   S.sw = sess.runs.map(() => []);
   feed = []; pending = new Map(); seenEv = sess.runs.map(() => 0); seenReid = sess.runs.map(() => 0); prevHidden = new Map(); marks = []; prevMatch = sess.runs.map(() => new Map()); idHist = sess.runs.map(() => new Map());
   pushFeed(MOT_SCENARIOS[S.scenario].label, '');
@@ -399,12 +399,14 @@ function wire() {
     $('optHeat').checked = S.heat; $('optLander').checked = S.lander;
     $('btnHeat').classList.toggle('on', S.heat); $('btnHeat').textContent = `🔥 Heat map: ${S.heat ? 'on' : 'off'}`;
     $('btnLander').classList.toggle('on', S.lander); $('btnLander').textContent = `📷 Lander camera: ${S.lander ? 'on' : 'off'}`;
+    $('btnEyes').classList.toggle('on', S.eyes === 'event'); $('btnEyes').textContent = `👁 Eyes: ${S.eyes === 'event' ? 'event camera' : 'camera'}`;
     $('optLidar').checked = S.lidar; $('btnLidar').classList.toggle('on', S.lidar); $('btnLidar').textContent = `📡 Lidar: ${S.lidar ? 'on' : 'off'}`;
   };
   const setHeat = (v) => { S.heat = v; syncOpts(); };
   const setLander = (v) => { S.lander = v; syncOpts(); newSession(); pushFeed(S.lander ? 'Lander camera on: two viewpoints fused' : 'Lander camera off', ''); };
   $('optHeat').onchange = (e) => setHeat(e.target.checked); $('btnHeat').onclick = () => setHeat(!S.heat);
   $('optLander').onchange = (e) => setLander(e.target.checked); $('btnLander').onclick = () => setLander(!S.lander);
+  $('btnEyes').onclick = () => { S.eyes = S.eyes === 'event' ? 'camera' : 'event'; syncOpts(); newSession(); pushFeed(S.eyes === 'event' ? 'Event camera: sees motion only. Anyone who stops disappears from it.' : 'Ordinary camera', ''); };
   const setLidar = (v) => { S.lidar = v; syncOpts(); newSession(); pushFeed(S.lidar ? 'Lidar on: camera + lidar fused (lidar sees in shadow)' : 'Lidar off', ''); };
   $('optLidar').onchange = (e) => setLidar(e.target.checked); $('btnLidar').onclick = () => setLidar(!S.lidar);
   syncOpts();

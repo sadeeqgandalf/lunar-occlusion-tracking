@@ -5,8 +5,8 @@ import { MotMetrics } from './metrics.js';
 import { ParticlePHD } from './phd.js';
 
 export class MotSession {
-  constructor({ scenario = 'boulders', seed = 7, overrides = {}, trackerParams = {}, phd = false, lander = false, lidar = false } = {}) {
-    this.world = new MotWorld(scenario, seed, overrides, { lander, lidar });
+  constructor({ scenario = 'boulders', seed = 7, overrides = {}, trackerParams = {}, phd = false, lander = false, lidar = false, eyes = 'camera' } = {}) {
+    this.world = new MotWorld(scenario, seed, overrides, { lander, lidar, eyes });
     const W = this.world, pd = W.cfg.pd, clutter = W.cfg.clutter, sun = W.cfg.shadows ? W.sun : null;
     // Ablation: identical trackers except for how they treat occlusion; the 4th also recognises people by appearance.
     this.runs = [

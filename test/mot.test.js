@@ -198,3 +198,23 @@ test('lidar instance segmentation: masks found from the ranges alone overlap the
   assert.ok(sum / n > 0.85, `mean IoU ${(sum / n).toFixed(3)}`);
   assert.ok(flagged / n > 0.9, `person-shaped flag recall ${(flagged / n).toFixed(2)}`);
 });
+
+test('event camera: sees motion, not presence; default camera results are unchanged', async () => {
+  const { sensorPd, motionSignal } = await import('../src/mot/occlusion.js');
+  const { EVENT, CAMERA } = await import('../src/mot/world.js');
+  const cam = { ...CAMERA, ...EVENT }, v = { inFov: true, visFrac: 1, range: 20, bearing: Math.PI / 2 };
+  assert.equal(sensorPd(cam, v, 0.95, 0, [0, 0]), 0);                               // standing still in plain view: nothing to report
+  assert.ok(sensorPd(cam, v, 0.95, 0, [1, 0]) > 0.94);                              // walking across the view at 1 m/s
+  assert.ok(motionSignal(cam, v, [0, 1]) < motionSignal(cam, v, [1, 0]));           // straight toward the camera is weaker than across
+  assert.ok(sensorPd(cam, v, 0.95, 1, [1, 0]) > 0.8);                               // full shadow costs an event camera little
+  assert.ok(sensorPd(null, v, 0.95, 1) < 0.25);                                     // ... and an ordinary camera a lot
+  assert.equal(sensorPd(cam, { ...v, visFrac: 0.1 }, 0.95, 0, [1, 0]), 0);          // still needs line of sight
+  // people who stop to work: the event camera loses sight of them, the ordinary camera does not
+  const hidden = (eyes) => { const s = new MotSession({ scenario: 'work', seed: 3, eyes }); let n = 0, k = 0; for (let i = 0; i < 600; i++) { s.step(); for (const t of s.world.targets) if (t.pause > 0 && t.vis.inFov && t.vis.visFrac >= 0.7) { n++; if (t.vis.pd < 0.15) k++; } } return [k, n]; };
+  const [ke, ne] = hidden('event'), [kc, nc] = hidden('camera');
+  assert.ok(ne > 100 && ke === ne, `event camera: ${ke} of ${ne} stopped, fully visible person-frames undetectable`);
+  assert.equal(kc, 0, 'ordinary camera still sees them');
+  // the default lab is untouched: same switches as before the event camera existed (boulders, seed 8, 60 s)
+  const base = new MotSession({ scenario: 'boulders', seed: 8 }).run(60).summaries().map((r) => r.idsw);
+  assert.deepEqual(base, new MotSession({ scenario: 'boulders', seed: 8, eyes: 'camera' }).run(60).summaries().map((r) => r.idsw));
+});

@@ -244,9 +244,10 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
     const ov = camOverlay, dpr = window.devicePixelRatio || 1, ow = ov.clientWidth, oh = ov.clientHeight;   // size + clear once
     if (ov.width !== Math.round(ow * dpr) || ov.height !== Math.round(oh * dpr)) { ov.width = Math.round(ow * dpr); ov.height = Math.round(oh * dpr); }
     ov.getContext('2d').setTransform(dpr, 0, 0, dpr, 0, 0); ov.getContext('2d').clearRect(0, 0, ow, oh);
-    const nPanels = 1 + (w.lander ? 1 : 0) + (w.lidar ? 1 : 0), pw = 1 / nPanels;
-    const views = [[w.cam, roverCam, 0, pw, 'vis', MAST_H, null]];
-    if (w.lander) views.push([w.lander, landerCam, pw, 2 * pw, 'visL', w.lander.h, 'LANDER CAMERA']);
+    // panels, left to right: rover view, [event camera], [lander], [lidar]
+    const ev = w.cam.event ? 1 : 0, nPanels = 1 + ev + (w.lander ? 1 : 0) + (w.lidar ? 1 : 0), pw = 1 / nPanels;
+    const views = [[w.cam, roverCam, 0, pw, 'vis', MAST_H, ev ? 'ORDINARY VIEW · for reference, the tracker does not use it' : null]];
+    if (w.lander) views.push([w.lander, landerCam, (1 + ev) * pw, (2 + ev) * pw, 'visL', w.lander.h, 'LANDER CAMERA']);
     for (const [cam, vcam, f0, f1, field, eyeH, title] of views) {
       const eye = toV(cam.x, cam.y, height(cam.x, cam.y) + eyeH), tilt = cam === w.cam ? -0.05 : -Math.atan2(eyeH, 26);
       vcam.position.copy(eye); vcam.lookAt(eye.clone().add(new THREE.Vector3(Math.cos(cam.th), Math.tan(tilt), -Math.sin(cam.th))));
@@ -271,8 +272,13 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
         boxes.push({ obj: g, color: c, text: has ? `#${n}` : 'no ID', dashed: !has });
       }
       R.autoClear = true;
-      if (cam === w.cam) drawTags(ov, camEl, vcam, labels2, f0, f1);
-      drawBoxes(ov, camEl, vcam, boxes, f0, f1);
+      if (cam === w.cam && cam.event) {                    // the tracker's eyes are the event camera: its own panel, with the IDs on it
+        drawEventView(ov, camEl, vcam, w, pw, 2 * pw, showTruth);
+        drawTags(ov, camEl, vcam, labels2, pw, 2 * pw); drawBoxes(ov, camEl, vcam, boxes, pw, 2 * pw);
+      } else {
+        if (cam === w.cam) drawTags(ov, camEl, vcam, labels2, f0, f1);
+        drawBoxes(ov, camEl, vcam, boxes, f0, f1);
+      }
       if (title) {
         const c2 = ov.getContext('2d'), x = f0 * camEl.clientWidth;
         c2.save(); c2.font = 'bold 11px system-ui'; c2.fillStyle = '#0a0e16cc'; c2.fillRect(x + 8, 8, c2.measureText(title).width + 14, 20);
@@ -324,6 +330,43 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
   };
   /** Bounding boxes from each person's projected 3-D extent, in their ID colour, drawn on the camera overlay. */
   const _box = new THREE.Box3(), _v = new THREE.Vector3();
+  /** What an event camera reports, drawn over the rover's view: only things that move leave events. Orange = pixels
+   *  getting brighter (leading edge), blue = getting darker (trailing edge). Strength follows the sensor model
+   *  (t.vis.pd). A schematic of the signal, not a pixel-accurate event simulation. */
+  function drawEventView(ov, el, cam, w, f0, f1, showTruth) {
+    const c = ov.getContext('2d'), W = el.clientWidth * (f1 - f0), H = el.clientHeight, ox = el.clientWidth * f0;
+    c.save(); c.beginPath(); c.rect(ox, 0, W, H); c.clip();
+    c.fillStyle = 'rgba(4,5,9,0.94)'; c.fillRect(ox, 0, W, H);
+    for (let k = 0; k < 70; k++) { c.fillStyle = Math.random() < 0.5 ? '#ff9a4a55' : '#4a9aff55'; c.fillRect(ox + Math.random() * W, Math.random() * H, 1.2, 1.2); }   // sensor noise
+    for (const t of w.targets) {
+      const g = people.get(t.id), v = t.vis; if (!g || !v.inFov) continue;
+      _box.setFromObject(g); let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (let i = 0; i < 8; i++) {
+        _v.set(i & 1 ? _box.max.x : _box.min.x, i & 2 ? _box.max.y : _box.min.y, i & 4 ? _box.max.z : _box.min.z).project(cam);
+        if (_v.z > 1) continue;
+        const x = ox + (_v.x * 0.5 + 0.5) * W, y = (-_v.y * 0.5 + 0.5) * H; x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y);
+      }
+      if (!(x1 > x0)) continue;
+      const s = Math.min(1, v.pd / w.cfg.pd), bw = x1 - x0, bh = y1 - y0, vel = t.vel || [0, 0];
+      const right = -vel[0] * Math.sin(w.cam.th) + vel[1] * Math.cos(w.cam.th) < 0;      // moving to the right on screen?
+      if (s > 0.03) {
+        const lead = right ? x1 : x0, trail = right ? x0 : x1;
+        c.globalAlpha = Math.min(1, 0.25 + s); c.lineWidth = 2;
+        c.strokeStyle = '#ff9a4a'; c.beginPath(); c.moveTo(lead, y0); c.lineTo(lead, y1); c.stroke();
+        c.strokeStyle = '#4a9aff'; c.beginPath(); c.moveTo(trail, y0); c.lineTo(trail, y1); c.stroke();
+        for (let k = 0; k < 14 + 90 * s * Math.min(1, (bw * bh) / 900); k++) { c.fillStyle = Math.random() < 0.5 ? '#ff9a4a' : '#4a9aff'; c.fillRect(x0 + Math.random() * bw, y0 + Math.random() * bh, 1.6, 1.6); }
+        c.globalAlpha = 1;
+      } else if (showTruth && v.visFrac >= 0.25) {                                       // in plain view, but still: no events
+        c.strokeStyle = '#9aa3b2aa'; c.lineWidth = 1; c.setLineDash([3, 4]); c.strokeRect(x0, y0, bw, bh); c.setLineDash([]);
+        c.font = '10px system-ui'; c.fillStyle = '#9aa3b2'; c.fillText('still: no events', x0 - 14, y1 + 12);
+      }
+    }
+    c.fillStyle = '#ffffff55'; c.fillRect(ox, 0, 1.5, H);
+    c.font = 'bold 11px system-ui'; c.fillStyle = '#7fe3ff'; c.fillText('EVENT CAMERA · the tracker\u2019s eyes · sees motion, not presence', ox + 10, 19);
+    c.font = '10px system-ui'; c.fillStyle = '#9aa3b2'; c.fillText('orange = brighter · blue = darker · response fitted to real EVOS recordings', ox + 10, H - 9);
+    c.restore();
+  }
+
   function drawBoxes(ov, el, cam, items, f0 = 0, f1 = 1) {
     const c = ov.getContext('2d'), w = el.clientWidth * (f1 - f0), h = el.clientHeight, ox = el.clientWidth * f0;
     for (const it of items) {

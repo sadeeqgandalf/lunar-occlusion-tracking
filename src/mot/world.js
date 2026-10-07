@@ -5,9 +5,11 @@ import { visibility, detectionProb, shadowFraction, sensorPd } from './occlusion
 import { personSignature, clutterSignature } from './appearance.js';
 
 export const MOT_SCENARIOS = {
+  // 'work' = the boulder field, but people stop for about 6 s at each worksite (as on a real EVA)
   boulders: { label: 'Artemis EVA · Boulder field', blurb: 'Five crew/rovers walk through a boulder field. They keep disappearing behind rocks.', targets: 5, boulders: 9, pd: 0.95, clutter: 0.8 },
   crossing: { label: 'Worksite · Crossing paths', blurb: 'Eight targets, paths cross often behind cover. Hardest for keeping identities.', targets: 8, boulders: 7, pd: 0.92, clutter: 1.2 },
   polar: { label: 'South pole · Long shadows', blurb: 'Same boulder field under the low polar sun: people also vanish into long cast shadows, not just behind rocks.', targets: 5, boulders: 9, pd: 0.95, clutter: 0.8, shadows: true },
+  work: { label: 'Artemis EVA · Stop and work', blurb: 'The boulder field again, but people stop for a few seconds at each worksite. An ordinary camera still sees them; an event camera does not.', targets: 5, boulders: 9, pd: 0.95, clutter: 0.8, dwell: 6 },
   open: { label: 'Open plain · Sparse cover', blurb: 'A single boulder: fewer, shorter occlusions. Shows how results scale with how much cover there is.', targets: 5, boulders: 1, pd: 0.95, clutter: 0.8 },
 };
 
@@ -23,15 +25,19 @@ export const LIDAR = { x: 0, y: -4, h: 2.0, th: Math.PI / 2, fov: (140 * Math.PI
   pd: 0.97, clutter: 0.3, sigB: 0.003, sigR0: 0.05, sigRk: 0.00002, imgW: 960, imgH: 300, targetH: 1.8, targetR: 0.4,
   modelInflate: 2,   // tracker's noise model x2: covers the centroid shift of a partly hidden person (else precise returns get gated out)
   channels: 64, elevMin: (-25 * Math.PI) / 180, elevMax: (4 * Math.PI) / 180, azStep: (0.25 * Math.PI) / 180 };
+// Event camera on the rover mast, in place of the ordinary camera: same view and (stereo pair) depth noise, but it
+// detects motion, not presence (occlusion.js: sensorPd, motionSignal). No colour, so no appearance signature.
+// ponytail: modelled as a stereo pair with the frame camera's depth noise; a single event camera gives bearing only.
+export const EVENT = { event: true, sigB: 0.003 };
 export const LANDER = { x: 24, y: 46, h: 6, fov: (90 * Math.PI) / 180, range: 60 };   // lander camera, 6 m up
 export const LANDER_AIM = { x: 0, y: 18 };                                             // ... aimed at the worksite
 export const sigRange = (cam, r) => cam.sigR0 + cam.sigRk * r * r;
 
 export class MotWorld {
-  constructor(scenario = 'boulders', seed = 7, overrides = {}, { lander = false, lidar = false } = {}) {
+  constructor(scenario = 'boulders', seed = 7, overrides = {}, { lander = false, lidar = false, eyes = 'camera' } = {}) {
     this.cfg = { ...MOT_SCENARIOS[scenario] || MOT_SCENARIOS.boulders, ...overrides };
     this.id = scenario; this.seed = seed;
-    this.cam = { ...CAMERA };
+    this.cam = eyes === 'event' ? { ...CAMERA, ...EVENT } : { ...CAMERA };
     this.bounds = { xmin: -38, xmax: 38, ymin: 0, ymax: 46 };
     this.rng = new RNG(seed * 9973 + 17);   // world + truth motion
     this.srng = new RNG(seed * 7717 + 5);   // sensor noise (separate stream: same truth regardless of detector settings)
@@ -87,7 +93,16 @@ export class MotWorld {
   step() {
     const dt = this.dt, r = this.rng;
     for (const t of this.targets) {
-      if (!t.goal || Math.hypot(t.goal.x - t.x, t.goal.y - t.y) < 1.5) t.goal = this._goal();
+      if (!t.goal || Math.hypot(t.goal.x - t.x, t.goal.y - t.y) < 1.5) {
+        t.goal = this._goal();
+        // cfg.dwell > 0: stop and work at each site for about that many seconds (off by default: no extra random draws)
+        if (this.cfg.dwell) t.pause = this.cfg.dwell * r.uniform(0.5, 1.5);
+      }
+      if (t.pause > 0) {                                   // standing still: in plain view, but not moving
+        t.pause -= dt; t.vel = [0, 0]; t.vis = this.view(t.x, t.y, this.cam, t.vel);
+        if (this.lander || this.lidar) this._fuse(t);
+        continue;
+      }
       let sx = Math.cos(Math.atan2(t.goal.y - t.y, t.goal.x - t.x)), sy = Math.sin(Math.atan2(t.goal.y - t.y, t.goal.x - t.x));
       for (const b of this.boulders) {                     // walk around rocks, not through them
         const dx = t.x - b.x, dy = t.y - b.y, d = Math.hypot(dx, dy) - b.r;
@@ -99,7 +114,8 @@ export class MotWorld {
         const dx = t.x - b.x, dy = t.y - b.y, d = Math.hypot(dx, dy);
         if (d < b.r + 0.4) { t.x = b.x + (dx / d) * (b.r + 0.4); t.y = b.y + (dy / d) * (b.r + 0.4); }
       }
-      t.vis = this.view(t.x, t.y);
+      t.vel = [t.v * Math.cos(t.h), t.v * Math.sin(t.h)];
+      t.vis = this.view(t.x, t.y, this.cam, t.vel);
       if (this.lander || this.lidar) this._fuse(t);
       if (this.frame % 3 === 0) { t.trail.push([t.x, t.y]); if (t.trail.length > 120) t.trail.shift(); }
     }
@@ -116,10 +132,10 @@ export class MotWorld {
   }
 
   /** What a camera can see of a person at (x, y): geometry, optional cast-shadow darkness, and detection probability. */
-  view(x, y, cam = this.cam) {
+  view(x, y, cam = this.cam, vel = null) {
     const v = visibility(cam, this.boulders, x, y, this.cam.targetR);
     v.shadow = this.cfg.shadows ? shadowFraction(this.boulders, x, y, this.sun) : 0;
-    v.pd = sensorPd(cam, v, this.cfg.pd, cam.active ? 0 : v.shadow);   // the lidar brings its own light
+    v.pd = sensorPd(cam, v, this.cfg.pd, cam.active ? 0 : v.shadow, vel);   // the lidar brings its own light; an event camera needs motion
     return v;
   }
 
@@ -127,7 +143,7 @@ export class MotWorld {
    * One camera frame of detections. The tracker gets ONLY `dets` (no identities). `gt[i]` is the true target id
    * of dets[i] (0 = clutter), kept separate for scoring.
    */
-  sense() { return this._sense(this.cam, 'vis', this.srng, this.arng); }
+  sense() { return this._sense(this.cam, 'vis', this.srng, this.cam.event ? null : this.arng); }
   /** The lander camera's frame (same detector model, its own viewpoint and random streams). */
   senseLander() { return this._sense(this.lander, 'visL', this.lrng, this.larng); }
   /** The lidar's frame: centroids of person-shaped point clusters. No colour, so no appearance signature. */

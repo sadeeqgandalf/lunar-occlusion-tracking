@@ -12,7 +12,7 @@ The lab runs in **real-time 3-D** (Three.js/WebGL) with **official NASA 3-D mode
 npm start                                   # zero dependencies, Node >= 18
 open http://localhost:8080/track.html       # Occlusion Tracking Lab
 open http://localhost:8080                  # Navigation lab (EKF/UKF/PF mission control)
-npm test                                    # 45 tests
+npm test                                    # 46 tests
 node experiments/occlusion_ablation.mjs     # regenerates experiments/results.md (20 seeds x 3 scenarios, ~2 min)
 ```
 
@@ -21,6 +21,7 @@ node experiments/occlusion_ablation.mjs     # regenerates experiments/results.md
 * **[The trackers, ranked](docs/TRACKERS.md):** every tracker as one step toward tracking through occlusion (naive → occlusion-aware → negative information → appearance re-ID → second camera → lidar), with measured results and MathWorks' GNN, JIPDA and TOMHT for comparison.
 * **[Learning guide](docs/OCCLUSION_GUIDE.md):** every idea in plain words, then the maths, then the exact code location, then the paper behind it, then something to try in the lab.
 * **[References](docs/REFERENCES.md):** every method traced to the literature (tracking, data association, existence, evaluation, lunar illumination). Each citation was checked against publisher or index records. The file also says honestly what is standard here and what is not claimed.
+* **[Event camera](experiments/event_camera.md):** swap the rover's camera for an event camera (sees motion, not presence), with its response fitted to [real EVOS recordings](evos/README.md); 20-seed results against the ordinary camera.
 * **In the lab:** a 10-step **▶ Tour**, a **What if…?** panel (detection rate, false alarms, crowd size, low rocks, polar shadows), a live ID-switch chart, and a glossary with links into the guide.
 
 ## The experiment

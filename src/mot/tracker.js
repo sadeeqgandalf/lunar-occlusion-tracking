@@ -62,7 +62,8 @@ export class Tracker {
       const x = t.x.slice();
       for (let r = 0; r < 4; r++) for (let c = 0; c <= r; c++) x[r] += L.get(r, c) * z[c];
       const v = visibility(this.cam, this.boulders, x[0], x[1], this.cam.targetR);   // per sensor: camera or lidar
-      pts.push({ x, pd: sensorPd(this.cam, v, this.p.pd, this.sun && !this.cam.active ? shadowFraction(this.boulders, x[0], x[1], this.sun) : 0) });
+      // an event camera's P_D also depends on how the person is predicted to be moving (x[2], x[3])
+      pts.push({ x, pd: sensorPd(this.cam, v, this.p.pd, this.sun && !this.cam.active ? shadowFraction(this.boulders, x[0], x[1], this.sun) : 0, this.cam.event ? [x[2], x[3]] : null) });
     }
     return pts;
   }
@@ -106,7 +107,7 @@ export class Tracker {
         for (const c of cams) {
           this.cam = c;
           const v = visibility(c, this.boulders, q.x[0], q.x[1], c.targetR);
-          keep *= 1 - sensorPd(c, v, this.p.pd, this.sun && !c.active ? shadowFraction(this.boulders, q.x[0], q.x[1], this.sun) : 0);
+          keep *= 1 - sensorPd(c, v, this.p.pd, this.sun && !c.active ? shadowFraction(this.boulders, q.x[0], q.x[1], this.sun) : 0, c.event ? [q.x[2], q.x[3]] : null);
         }
         q.pd = 1 - keep;                                              // treat as one combined detection probability
       }

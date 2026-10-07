@@ -90,13 +90,37 @@ export function detectionProb(inFov, visFrac, pdMax, shadowFrac = 0) {
  *  active lidar (sensor.active): brings its own light, so no shadow penalty; but a far person returns fewer points,
  *  so it fades linearly from full at sensor.fullRange to zero at sensor.range. Both need line of sight past rocks.
  */
-export function sensorPd(sensor, v, pdDefault, shadowFrac = 0) {
+export function sensorPd(sensor, v, pdDefault, shadowFrac = 0, vel = null) {
+  if (sensor && sensor.event) {
+    // Event camera: reports brightness CHANGES, so it sees motion, not presence. A person standing still is in plain
+    // view and produces no events. High dynamic range: shadow costs little (EVENT_SHADOW).
+    if (!v.inFov || v.visFrac < 0.25) return 0;
+    return (sensor.pd ?? pdDefault) * Math.min(1, (v.visFrac - 0.25) / 0.45) * (1 - EVENT_SHADOW * shadowFrac) * motionSignal(sensor, v, vel);
+  }
   if (sensor && sensor.active) {
     if (!v.inFov || v.visFrac < 0.25) return 0;
     const rf = v.range <= sensor.fullRange ? 1 : Math.max(0, 1 - (v.range - sensor.fullRange) / (sensor.range - sensor.fullRange));
     return sensor.pd * Math.min(1, (v.visFrac - 0.25) / 0.45) * rf;
   }
   return detectionProb(v.inFov, v.visFrac, sensor?.pd ?? pdDefault, shadowFrac);
+}
+
+// Event-camera response to apparent motion, fitted to a real recording (EVOS dataset, Crain & Ulrich 2025, run
+// CC-T-NOM, DVXplorer Micro; fit by fit_motion.py: correlation 0.97 with the measured event rate):
+//   signal = 1 - exp(-(omega + EVENT_LOOM * loom) / EVENT_S0)
+//   omega = speed across the view [rad/s], loom = |range rate| / range [1/s] (growing or shrinking in the image)
+// ponytail: measured on a 0.3 m foil-wrapped spacecraft model at 2 m, applied to people at 10-45 m, and it ignores
+// limb motion; re-fit on event recordings of walking people when such data is available.
+export const EVENT_S0 = 0.0077, EVENT_LOOM = 0.10;
+// Dark vs nominal light on the same EVOS manoeuvre: about 10% fewer events at 0.6 lux (CIRC-TR-DARK vs CIRC-TR-NOM).
+export const EVENT_SHADOW = 0.1;
+
+/** How strongly an event camera responds to a person at view v moving with velocity vel = [vx, vy] (0..1). */
+export function motionSignal(sensor, v, vel) {
+  if (!vel) return 1;
+  const r = Math.max(v.range, 1), bx = Math.cos(v.bearing ?? v.visCenter), by = Math.sin(v.bearing ?? v.visCenter);
+  const radial = vel[0] * bx + vel[1] * by, across = -vel[0] * by + vel[1] * bx;
+  return 1 - Math.exp(-(Math.abs(across) / r + EVENT_LOOM * Math.abs(radial) / r) / EVENT_S0);
 }
 
 /** "Hidden" for scoring and display: in view of the camera's field, but effectively undetectable. */
