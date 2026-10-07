@@ -17,7 +17,7 @@
   #glAll{position:absolute;left:0;width:100%;z-index:0;display:none}
   #viewsw{position:absolute;left:10px;top:10px;display:flex;z-index:3}#viewsw button{border-radius:0;margin-left:-1px}#viewsw button:first-child{border-radius:6px 0 0 6px}#viewsw button:last-child{border-radius:0 6px 6px 0}#viewsw button.on{background:var(--cyan);color:#04202d;border-color:var(--cyan)}
   #viewopts{position:absolute;left:118px;top:10px;display:flex;gap:6px;z-index:3}#viewopts button{font-size:12.5px;padding:5px 10px}#viewopts button.on{background:#3a2f0d;border-color:#ffd166;color:#ffe3a3}
-  #load3d{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:var(--dim);font:13px var(--mono)}
+  #load3d{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);color:var(--text);background:#0a0e16e6;border:1px solid var(--line);border-radius:999px;padding:5px 14px;font:12.5px var(--mono);white-space:nowrap;pointer-events:none}
   .hint3d{position:absolute;left:10px;bottom:10px;font-size:11.5px;color:#9aa3b2;background:#0a0e16cc;padding:4px 8px;border-radius:6px;pointer-events:none}
   .over{position:absolute;background:#0a0e16e6;border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:12.5px;pointer-events:none}
   #now{right:10px;top:10px}#now .sw{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px}
@@ -66,7 +66,7 @@
     <div id="mapwrap"><canvas id="map"></canvas><canvas id="ov3d"></canvas>
       <div id="viewsw"><button data-v="3d" class="on">3D</button><button data-v="2d">Map</button></div>
       <div id="viewopts"><button id="btnEyes" title="Swap the rover's ordinary camera for an event camera: it sees motion, not presence, and works in shadow">👁 Eyes: camera</button><button id="btnLander" title="Add a second camera on a lander, 6 m up, looking back across the worksite">📷 Lander camera: off</button><button id="btnLidar" title="Add a 3-D scanning lidar on the rover mast: brings its own light, so it sees in shadow">📡 Lidar: off</button><button id="btnHeat" class="on" title="Glow = where anyone could be (PHD filter)">🔥 Heat map: on</button></div>
-      <div id="load3d">Loading NASA 3D models…</div>
+      <div id="load3d">Loading the 3-D view… the map is already live</div>
       <div class="hint3d" id="hint3d">Drag to orbit · scroll to zoom<span id="gfxNote" style="pointer-events:auto"></span></div>
       <div id="now" class="over"></div>
     </div>

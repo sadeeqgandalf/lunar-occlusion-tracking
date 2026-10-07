@@ -116,7 +116,6 @@ gated update per camera, each with **that camera's** visibility-based `P_D`. Tha
 measurement-level sensor fusion. A person is hidden only if both cameras miss them.
 
 **Fixes.** With re-ID: ID switches 23 → **9** and IDF1 0.54 → **0.74** (boulders); long hides kept rise to 87% (boulders) and 86% (polar). Without awareness it backfires (Naive, above).
-to 90%. Without awareness it backfires (Naive, above).
 **Not modelled yet.** Camera calibration errors, time offsets, joint multi-camera assignment, track-to-track fusion.
 **Code.** `tracker.stepFrames`; lander in `src/mot/world.js`.
 
