@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Multimodal Policy Lab</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2714%27 fill=%27%230b0e14%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%276%27 fill=%27%23f59e0b%27/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="styles.css" />
+<script type="importmap">{ "imports": { "three": "./vendor/three/build/three.module.min.js" } }</script>
+<style>
+  :root { --expert: #e5e7eb; --bc: #ff5d6c; --ar: #ffb454; --dp: #b794f6; --left: #4cc9f0; --right: #4ade80; }
+  .topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 8px 14px;
+    background: linear-gradient(#141c2e, #0e1523); border-bottom: 1px solid var(--line); }
+  .topbar .brand { display: flex; align-items: center; gap: 10px; letter-spacing: 0; }
+  .topbar .dot { width: 11px; height: 11px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 10px #f59e0b; }
+  .topbar .title { font: 700 13.5px var(--mono); color: #f8fafc; }
+  .topbar .title span { color: #f59e0b; }
+  .topbar .subtitle { font-size: 11.5px; color: #94a3b8; }
+  .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .lab-nav { display: flex; gap: 6px; margin-right: 6px; }
+  .lab-link { text-decoration: none; padding: 5px 10px; border-radius: 6px; font-size: 11.5px; font-weight: 600;
+    border: 1px solid #233047; background: #0f1623; color: #94a3b8; }
+  .lab-link:hover { border-color: #38bdf8; color: #f8fafc; }
+  .lab-link.active { background: linear-gradient(135deg, #d97706, #b45309); border-color: #f59e0b; color: #fff; }
+
+  main.plab { flex: 1; display: grid; grid-template-columns: 310px minmax(0, 1fr) 360px; min-height: 0; }
+  aside.panel { overflow-y: auto; background: var(--panel); padding: 4px 14px 16px; }
+  aside.left { border-right: 1px solid var(--line); }
+  aside.right { border-left: 1px solid var(--line); }
+  .lede { font-size: 13px; line-height: 1.55; color: #cbd5e1; margin: 12px 0 4px; }
+  .lede b { color: #f8fafc; }
+  .note { font-size: 11.5px; color: var(--dim); line-height: 1.45; margin: 4px 0 8px; }
+
+  .try { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .try button { text-align: left; font-size: 12px; padding: 6px 8px; }
+  .try button.on { border-color: var(--amber); color: #fff; }
+  #tryNote { min-height: 34px; }
+
+  .slider { margin-top: 10px; }
+  .slider small { display: block; color: var(--dim); font-size: 11px; margin-top: 1px; }
+
+  .pol { display: grid; grid-template-columns: 16px 1fr; gap: 2px 8px; align-items: start; padding: 6px 0; border-bottom: 1px dotted #1b2538; cursor: pointer; }
+  .pol input { margin: 3px 0 0; accent-color: var(--amber); }
+  .pol b { font-size: 12.5px; }
+  .pol span { grid-column: 2; font-size: 11.5px; color: var(--dim); line-height: 1.4; }
+  .sw { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+
+  .seg.ck button { flex: 1; font-family: var(--mono); font-size: 11.5px; }
+  .seg.ck { display: flex; }
+
+  section.stage { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #03050a; }
+  .view { position: relative; flex: 1; min-height: 0; }
+  #gl, #ov { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #ov { pointer-events: none; }
+  #gl { cursor: crosshair; }
+  .hud { position: absolute; left: 10px; top: 10px; background: #0a0e16d9; border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 10px; font-size: 11.5px; color: #cbd5e1; pointer-events: none; display: flex; flex-direction: column; gap: 3px; }
+  .hud .ring { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 1.5px dashed var(--bad); margin-right: 6px; vertical-align: -2px; }
+  .hud .fan { display: inline-block; width: 14px; border-top: 1px solid #cbd5e1; opacity: 0.6; margin-right: 6px; vertical-align: 3px; }
+  .hud .trk { display: inline-block; width: 14px; border-top: 4px solid #cbd5e1; margin-right: 6px; vertical-align: 2px; }
+  #runMsg { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); background: #0a0e16e6; border: 1px solid var(--line);
+    border-radius: 8px; padding: 5px 12px; font: 12px var(--mono); color: #cbd5e1; pointer-events: none; }
+  .strip { height: 34%; min-height: 200px; display: grid; grid-template-columns: 1fr 1.25fr; border-top: 1px solid var(--line); background: #050811; }
+  .pane { position: relative; min-width: 0; padding: 8px 10px 6px; display: flex; flex-direction: column; }
+  .pane + .pane { border-left: 1px solid var(--line); }
+  .pane h4 { margin: 0 0 2px; font: 600 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
+  .pane p { margin: 0 0 4px; font-size: 11.5px; color: #94a3b8; }
+  .pane canvas { flex: 1; min-height: 0; width: 100%; display: block; }
+
+  table.live td, table.live th { padding: 4px 3px; }
+  table.live td:nth-child(n+2) { font-family: var(--mono); }
+  .st-goal { color: var(--good); } .st-crash { color: var(--bad); } .st-stuck { color: var(--warn); } .st-driving { color: #cbd5e1; }
+  table.score td.hi { color: var(--bad); font-weight: 700; }
+  table.score th[colspan] { text-align: center; color: #cbd5e1; border-bottom: none; }
+  table.score td, table.score th, table.live td { white-space: nowrap; padding: 3px 2px; font-size: 11px; }
+  table.score td.lo { color: var(--good); }
+  .chart { height: 150px; }
+  ul.compact { margin: 4px 0; padding-left: 18px; font-size: 11.5px; color: #94a3b8; line-height: 1.5; }
+  ul.compact a, h3 small a { color: var(--cyan); }
+  .note b { color: #cbd5e1; }
+  kbd { font-size: 10.5px; }
+
+  @media (max-width: 1250px) { main.plab { grid-template-columns: 270px minmax(0, 1fr) 320px; } }
+  @media (max-width: 1000px) {
+    body { overflow: auto; }
+    main.plab { display: flex; flex-direction: column; }
+    section.stage { height: 85vh; flex: none; }
+    aside.panel { overflow: visible; border: none; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="dot"></span>
+    <div>
+      <div class="title">Stage 4: Multimodal Policy Lab — <span>learning to drive from an expert with two answers</span></div>
+      <div class="subtitle">Three imitation-learning policies, trained on the same demonstrations, drive side by side</div>
+    </div>
+  </div>
+  <div class="controls">
+    <nav class="lab-nav" aria-label="Suite navigation">
+      <a class="lab-link" href="index.html" title="Stage 1: EKF / UKF / PF state estimation">1. Find Ourselves (State Est)</a>
+      <a class="lab-link" href="slam.html" title="Stage 2: SLAM">2. See &amp; Map (SLAM)</a>
+      <a class="lab-link" href="track.html" title="Stage 3: occlusion multi-object tracking">3. Track What We Lose (MOT)</a>
+      <a class="lab-link active" href="policy.html" title="Stage 4: imitation-learning policies">4. Act (Multimodal Policy Lab)</a>
+    </nav>
+    <label>Scene <select id="scene"><option value="moon">Moon</option><option value="road">Road</option></select></label>
+    <div class="seg" id="speed" title="Playback speed"></div>
+    <button id="play" title="Space">⏸ Pause</button>
+    <button id="next" title="N: run until the next decision">⏭ Next decision</button>
+    <button id="again" title="R: same settings, new random draws">↻ New run</button>
+    <span id="clock" class="clock">t = 0.0 s</span>
+  </div>
+</header>
+
+<main class="plab">
+  <aside class="panel left">
+    <p class="lede">An expert rover passes a rock on the <b>left</b> or the <b>right</b>. With the rock dead ahead it picks
+      either side, 50/50. Three policies learn from the same <b id="nPairs">…</b> expert decisions.
+      Which ones learn to <b>choose</b> a side, and which one <b>averages</b> the two into the rock?</p>
+
+    <h3>Try this</h3>
+    <div class="try">
+      <button data-try="ahead">Rock dead ahead</button>
+      <button data-try="aside">Rock off to one side</button>
+      <button data-try="blur">Blurry perception</button>
+      <button data-try="untrained">Before training</button>
+    </div>
+    <p id="tryNote" class="note"></p>
+
+    <h3>World <small>or click the ground to place the rock</small></h3>
+    <label class="slider">Rock sideways offset <b id="vOff"></b>
+      <input id="off" type="range" min="-2" max="2" step="0.05" value="0" />
+      <small>0 = exactly on the straight line to the goal</small></label>
+    <label class="slider">Rock distance <b id="vDist"></b>
+      <input id="dist" type="range" min="5" max="9" step="0.1" value="7" /></label>
+    <label class="slider">Perception noise σ <b id="vSig"></b>
+      <input id="sig" type="range" min="0.05" max="0.4" step="0.01" value="0.05" />
+      <small>error (1 std) in where the rover sees the rock, redrawn every decision</small></label>
+
+    <h3>Policies</h3>
+    <label class="pol"><input type="checkbox" data-show="expert" checked /><b><i class="sw" style="background:var(--expert)"></i>Expert</b>
+      <span>The teacher. Steers along the edge of the rock's keep-out circle, on one side it commits to.</span></label>
+    <label class="pol"><input type="checkbox" data-show="bc" checked /><b><i class="sw" style="background:var(--bc)"></i>BC (regression)</b>
+      <span>Predicts the 8 actions directly with a squared-error loss, so it learns their <em>average</em>.</span></label>
+    <label class="pol"><input type="checkbox" data-show="ar" checked /><b><i class="sw" style="background:var(--ar)"></i>Autoregressive (transformer)</b>
+      <span>Turns the chunk into 8 tokens and picks them one at a time from probabilities.</span></label>
+    <label class="slider" style="margin:2px 0 6px 24px">Sampling temperature <b id="vTemp"></b>
+      <input id="temp" type="range" min="0.2" max="2" step="0.05" value="1" />
+      <small>1 = the learned probabilities (as scored); low = always the likeliest token</small></label>
+    <label class="pol"><input type="checkbox" data-show="dp" checked /><b><i class="sw" style="background:var(--dp)"></i>Diffusion</b>
+      <span>Starts from random noise and removes it in 50 steps, guided by what the rover sees.</span></label>
+
+    <h3>Training checkpoint <small>epochs</small></h3>
+    <div class="seg ck" id="ckpt"></div>
+    <p class="note" id="ckNote"></p>
+  </aside>
+
+  <section class="stage">
+    <div class="view">
+      <canvas id="gl" aria-label="Four rovers, one per policy, each in its own copy of the same world"></canvas>
+      <canvas id="ov"></canvas>
+      <div class="hud">
+        <div><span class="ring"></span>vehicle centre must stay outside (obstacle + body radius)</div>
+        <div><span class="fan"></span>plans the policy is considering now</div>
+        <div><span class="trk"></span>path driven</div>
+        <div id="roadNote" hidden>Road view: same world and networks; the stalled car is the circular obstacle,<br/>the ego car is drawn at the simulated body size (1 m).</div>
+      </div>
+      <div id="runMsg"></div>
+    </div>
+    <div class="strip">
+      <div class="pane">
+        <h4>Autoregressive: which way to turn?</h4>
+        <p>Probability of the chunk's average turn (token 2). Red: BC's answer.</p>
+        <canvas id="cvTok"></canvas>
+      </div>
+      <div class="pane">
+        <h4>Diffusion: from noise to a plan</h4>
+        <p>One chunk at 4 of its 50 denoising steps, from above. Faint: 11 more samples.</p>
+        <canvas id="cvDiff"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <aside class="panel right">
+    <h3>This run <small id="runSeed"></small></h3>
+    <table class="live">
+      <thead><tr><th>Policy</th><th>Turn now</th><th>Passed on</th><th>Result</th></tr></thead>
+      <tbody id="liveRows"></tbody>
+    </table>
+    <p class="note">One run is one sample. The scorecard below counts 400.</p>
+
+    <h3>Scorecard <small id="scoreCk"></small></h3>
+    <table class="score">
+      <thead>
+        <tr><th></th><th colspan="2" title="Rock, goal and noise drawn as in training">Random worlds</th><th colspan="3" title="Rock exactly on the line to the goal, σ = 0.05 m">Rock dead ahead</th></tr>
+        <tr><th>Policy</th><th>goal</th><th>crash</th><th>goal</th><th>crash</th><th title="Of the runs that got past the rock">left</th></tr>
+      </thead>
+      <tbody id="scoreRows"></tbody>
+    </table>
+    <p class="note" id="seedNote"></p>
+    <p class="note">Closed loop in <code>policy/train_eval.py</code>: each policy drives 400 worlds per test, re-planning every
+      1 s from noisy perception. Crash: the vehicle body touches the obstacle. Neither goal nor crash after 40 s: stuck.
+      Same worlds and same noise for every policy.</p>
+
+    <h3>Training loss <small>÷ loss before training</small></h3>
+    <canvas id="cvLoss" class="chart"></canvas>
+    <p class="note">Each loss is in its own units (squared error, cross-entropy, noise error), so each is shown relative to its
+      starting value. A low loss does not mean safe driving: compare BC's curve with its scorecard.</p>
+
+    <h3>What this lab simplifies</h3>
+    <ul class="compact">
+      <li>One rock and a flat ground; the rover sees the rock's position and size, not camera pixels.</li>
+      <li>The expert is a geometric planner, not a human driver.</li>
+      <li>Unicycle motion with no slip; the policy re-plans every 1 s and runs 4 of its 8 actions.</li>
+      <li>Action tokens use FAST's cosine transform without its byte-pair encoding.</li>
+    </ul>
+
+    <h3>Sources</h3>
+    <ul class="compact">
+      <li>Chi et al., <a href="https://arxiv.org/abs/2303.04137">Diffusion Policy</a>, RSS 2023</li>
+      <li>Pertsch et al., <a href="https://arxiv.org/abs/2501.09747">FAST: action tokenization</a>, 2025</li>
+      <li>Brohan et al., <a href="https://arxiv.org/abs/2307.15818">RT-2</a>, 2023</li>
+      <li>Laskey et al., <a href="https://arxiv.org/abs/1703.09327">DART: noise injection for imitation</a>, 2017</li>
+      <li>Nichol &amp; Dhariwal, <a href="https://arxiv.org/abs/2102.09672">Improved DDPM</a> (cosine schedule), 2021</li>
+      <li>ETH Zürich, <a href="https://cvg.ethz.ch/lectures/Robot-Learning/">Robot Learning</a> (Oier Mees), 2026: imitation learning, tokenized actions, diffusion policies</li>
+    </ul>
+    <p class="note">Reproduce: <code>python policy/train_eval.py</code> · tests: <code>npm test</code>, <code>pytest policy</code> · keys: <kbd>Space</kbd> pause, <kbd>N</kbd> next decision, <kbd>R</kbd> new run</p>
+  </aside>
+</main>
+
+<script type="module" src="src/ui/policy-app.js"></script>
+</body>
+</html>

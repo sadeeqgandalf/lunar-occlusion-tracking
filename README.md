@@ -10,13 +10,20 @@ The lab runs in **real-time 3-D** (Three.js/WebGL) with **official NASA 3-D mode
 
 ```bash
 npm start                                   # zero dependencies, Node >= 18
-open http://localhost:8080/track.html       # Occlusion Tracking Lab
-open http://localhost:8080                  # Navigation lab (EKF/UKF/PF mission control)
-npm test                                    # 46 tests
+open http://localhost:8080/track.html       # Lab 1: Lunar Occlusion Tracking Lab (3-D MOT)
+open http://localhost:8080/slam.html        # Lab 2: SLAM lab (live EKF-SLAM vs wheels only, step by step)
+open http://localhost:8080                  # Lab 3: Navigation Lab (EKF/UKF/PF Mission Control)
+open http://localhost:8080/policy.html      # Lab 4: Multimodal Policy Lab (BC vs autoregressive vs diffusion, closed loop)
+npm test                                    # 60 unit & integration tests (core, filters, MOT, SLAM, policy, UI)
 node experiments/occlusion_ablation.mjs     # regenerates experiments/results.md (20 seeds x 3 scenarios, ~2 min)
 ```
 
 ## Learn it
+
+* **[System Architecture](ARCHITECTURE.md):** complete Mermaid architecture diagram and modular directory map across all 3 interactive 3-D WebGL labs and offline Python/C++/MATLAB pipelines.
+* **[3-D Lunar Polar SLAM Lab](slam/README.md):** watch a real EKF-SLAM localize the rover and build its map live (predict, observe, correct, loop closure), next to wheel odometry alone; plus the offline benchmark where VGGT-SLAM (1 camera) and ORB-SLAM3 (2 cameras) were run on rendered rover drives at 30°, 7° and 2° sun.
+
+* **[Multimodal Policy Lab](policy/README.md):** three imitation-learning policies (regression, autoregressive transformer over FAST-style action tokens, diffusion) trained on the same expert runs and scored closed loop; with the rock dead ahead BC crashes in 19% of runs, the autoregressive policy in 3.5%, diffusion in 0.5% (5 training seeds × 400 closed-loop runs). The page runs the trained networks live; every run has a replay link.
 
 * **[The trackers, ranked](docs/TRACKERS.md):** every tracker as one step toward tracking through occlusion (naive → occlusion-aware → negative information → appearance re-ID → second camera → lidar), with measured results and MathWorks' GNN, JIPDA and TOMHT for comparison.
 * **[Learning guide](docs/OCCLUSION_GUIDE.md):** every idea in plain words, then the maths, then the exact code location, then the paper behind it, then something to try in the lab.
@@ -105,19 +112,23 @@ Modelling the disturbances as states (wheel slip, wind, accelerometer bias) fixe
 * **No ROS 2 node has been built.** ROS isn't installed on the development machine.
 * **UI testing:** UIs are tested by a stub-DOM test (every code path) and were inspected in a headless Chromium at several window sizes and pixel ratios. They have not been tested on mobile.
 
-## Layout
+## Layout (See [`ARCHITECTURE.md`](ARCHITECTURE.md) for Full Diagram)
 ```
 src/mot         occlusion geometry, lunar world + detector, MOT tracker, Hungarian, MOT metrics
+src/slam        EKF-SLAM engine (joint pose + landmark covariance), occupancy map from the believed pose, Umeyama alignment, ATE/RPE
 src/core        rng, linear algebra, arc kinematics, numerical Jacobians
 src/models      rover · jet · spacecraft estimation models
 src/filters     DR, EKF, UKF, particle filter
 src/platforms   truth dynamics + sensors + autopilot per vehicle
 src/sim         mission engine, scenarios, metrics
-src/ui          both labs' front ends (track.js = Occlusion Lab; world3d / mars3d / space3d = 3-D views; three-common = shared)
+src/ui          3-D WebGL & 2-D front ends (track.js, slam-app.js, app.js; world3d / slam3d / mars3d / space3d)
+slam/           offline VGGT-SLAM & ORB-SLAM3 recorder, ATE/RPE evaluator, and recorded polar runs
+pytorch3d/      differentiable 3-D lunar rendering & appearance re-ID pipeline
+matlab/         MathWorks Sensor Fusion & Tracking Toolbox (GNN / JIPDA / TOMHT) cross-check
 assets/nasa     official NASA 3-D models (see its README for terms)
 vendor/three    Three.js r169 (MIT), loaders + Draco decoder
 experiments/    reproducible occlusion ablation + results.md
-test/  bench/   tests, navigation benchmarks, cross-language proof
+test/  bench/   49 automated tests, navigation benchmarks, C++17 / Python / JS cross-language proof
 docs/           operator's guide, theory map, screenshots
 ```
 
