@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Lunar SLAM Lab</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2714%27 fill=%27%230b0e14%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%276%27 fill=%27%234cc9f0%27/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="styles.css" />
+<script type="importmap">{ "imports": { "three": "./vendor/three/build/three.module.min.js" } }</script>
+<style>
+  /* Full 3-Column 3-D SLAM Lab Layout & HUD Styles */
+  .topbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px 14px;
+    padding: 8px 14px;
+    background: linear-gradient(#141c2e, #0e1523);
+    border-bottom: 1px solid var(--line);
+  }
+  .topbar .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--mono);
+  }
+  .topbar .dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: #38bdf8;
+    box-shadow: 0 0 10px #38bdf8;
+  }
+  .topbar .title { font-weight: 700; font-size: 13.5px; color: #f8fafc; letter-spacing: 0.03em; }
+  .topbar .title .sub { color: #f59e0b; }
+  .topbar .subtitle { font-size: 11px; color: #94a3b8; font-family: -apple-system, BlinkMacSystemFont, sans-serif; letter-spacing: 0; }
+  .topbar .controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+  .lab-nav { display: flex; gap: 6px; align-items: center; margin-right: 6px; }
+  .lab-link {
+    text-decoration: none;
+    padding: 5px 10px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    font-weight: 600;
+    border: 1px solid #233047;
+    background: #0f1623;
+    color: #94a3b8;
+    transition: all 0.15s ease;
+  }
+  .lab-link:hover { border-color: #38bdf8; color: #f8fafc; }
+  .lab-link.active {
+    background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+    border-color: #38bdf8;
+    color: #ffffff;
+    box-shadow: 0 0 12px rgba(56, 189, 248, 0.35);
+  }
+
+  main.tgrid {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 330px minmax(0, 1fr) 350px;
+    min-height: 0;
+    overflow: hidden;
+  }
+  body.hide-right main.tgrid {
+    grid-template-columns: 330px minmax(0, 1fr);
+  }
+  body.hide-right aside.panel.right {
+    display: none;
+  }
+
+  aside.panel {
+    overflow-y: auto;
+    background: var(--panel);
+    padding: 10px 12px 14px;
+  }
+  aside.panel.left { border-right: 1px solid var(--line); }
+  aside.panel.right { border-left: 1px solid var(--line); }
+
+  .sec {
+    font: 600 11px var(--mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin: 10px 0 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .sec .hint { font-size: 10px; text-transform: none; letter-spacing: 0; color: #64748b; }
+
+  .story-banner {
+    background: linear-gradient(90deg, rgba(15,23,42,0.95), rgba(8,47,73,0.45));
+    border: 1px solid #1e3a5f;
+    border-radius: 7px;
+    padding: 7px 10px;
+    margin-bottom: 8px;
+    font-size: 11.5px;
+    line-height: 1.45;
+    color: #cbd5e1;
+  }
+  .story-banner b { color: #38bdf8; }
+
+  .kpi-strip {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  .kpi-box {
+    background: #0c121e;
+    border: 1px solid #1e293b;
+    border-radius: 6px;
+    padding: 6px 8px;
+  }
+  .kpi-box b {
+    display: block;
+    font-family: var(--mono);
+    font-size: 13.5px;
+    color: #f8fafc;
+  }
+  .kpi-box span { font-size: 10px; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
+
+  .tcard {
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    padding: 8px 10px;
+    margin: 6px 0;
+    background: var(--panel2);
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .tcard:hover { border-color: #38bdf8; }
+  .tcard.sel { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan) inset; }
+  .tcard .nm { font-weight: 700; font-size: 12.5px; }
+  .tcard .plain { font-size: 11.5px; color: #94a3b8; margin: 3px 0 6px; line-height: 1.35; }
+  .tcard .nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+  .tcard .nums b { display: block; font: 700 13px var(--mono); color: #f8fafc; }
+  .tcard .nums span { font-size: 10px; color: var(--dim); line-height: 1.15; display: block; }
+
+  .slider-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 8px 0;
+    padding: 8px 10px;
+    background: #0c121e;
+    border: 1px solid #1e293b;
+    border-radius: 6px;
+  }
+  .slider-head {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11.5px;
+    color: #cbd5e1;
+  }
+  .slider-head b { color: #38bdf8; font-family: var(--mono); }
+  .slider-row input[type="range"] { width: 100%; accent-color: #38bdf8; cursor: pointer; }
+
+  .action-btn {
+    width: 100%;
+    padding: 8px 10px;
+    margin-top: 6px;
+    border-radius: 6px;
+    border: 1px solid #10b981;
+    background: rgba(16, 185, 129, 0.14);
+    color: #6ee7b7;
+    font-weight: 600;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .action-btn:hover { background: rgba(16, 185, 129, 0.26); color: #ffffff; }
+
+  .prose { font-size: 11.5px; color: #94a3b8; line-height: 1.45; margin: 4px 0; }
+
+  /* Center Dual-Viewport 3-D Canvas + Bottom Split */
+  section.center3d {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    background: #03050a;
+    overflow: hidden;
+  }
+  canvas.gl-shared {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    z-index: 0;
+    pointer-events: none;
+  }
+  .mapwrap {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    z-index: 1;
+  }
+  .cam-strip {
+    position: relative;
+    height: 33%;
+    min-height: 175px;
+    display: grid;
+    grid-template-columns: 1.15fr 1fr;
+    border-top: 1px solid var(--line);
+    z-index: 1;
+  }
+  .camwrap, .uncwrap {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+  canvas.ov {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    pointer-events: none;
+  }
+  .cam-title {
+    position: absolute;
+    left: 8px;
+    top: 6px;
+    background: rgba(8, 12, 22, 0.84);
+    border: 1px solid #1e293b;
+    border-radius: 5px;
+    padding: 3px 8px;
+    font: 600 10.5px var(--mono);
+    color: #cbd5e1;
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  .hud {
+    position: absolute;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .hud.top-left { left: 10px; top: 10px; pointer-events: none; }
+  .hud.top-right { right: 10px; top: 10px; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; max-width: 65%; }
+  .hud.bot-left { left: 10px; bottom: 10px; pointer-events: none; }
+
+  .hud-row {
+    background: rgba(10, 14, 22, 0.86);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 5px 10px;
+    font-size: 12px;
+    color: #e2e8f0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .hud-row.legend { font-size: 11px; color: #94a3b8; }
+  .sw {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    margin-right: 5px;
+  }
+  .pill-btn {
+    background: rgba(15, 23, 42, 0.88);
+    border: 1px solid #28354d;
+    color: #cbd5e1;
+    border-radius: 6px;
+    padding: 4px 9px;
+    font-size: 11.5px;
+    cursor: pointer;
+  }
+  .pill-btn.on {
+    background: #172554;
+    border-color: #38bdf8;
+    color: #f8fafc;
+  }
+  .hint-keys {
+    background: rgba(10, 14, 22, 0.82);
+    border: 1px solid #1e293b;
+    border-radius: 6px;
+    padding: 4px 9px;
+    font-size: 11px;
+    color: #94a3b8;
+  }
+  .load-badge {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(10, 14, 22, 0.92);
+    border: 1px solid #38bdf8;
+    color: #f8fafc;
+    padding: 8px 16px;
+    border-radius: 999px;
+    font: 600 12.5px var(--mono);
+    z-index: 5;
+    pointer-events: none;
+  }
+
+  .paper-box {
+    background: #0b111d;
+    border-left: 3px solid #f59e0b;
+    padding: 8px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 1.45;
+    color: #94a3b8;
+    margin-top: 6px;
+  }
+  .paper-box b { color: #e2e8f0; }
+
+  .feed {
+    font: 11px/1.5 var(--mono);
+    max-height: 260px;
+    overflow-y: auto;
+  }
+</style>
+
+<style>
+  /* SLAM teaching panels */
+  .cam-strip { height: 50%; grid-template-columns: 0.85fr 1.5fr; }
+  .loop-step {
+    border: 1px solid #1e293b; border-left: 3px solid #334155; border-radius: 7px;
+    background: #0c121e; padding: 7px 10px; margin: 6px 0; transition: border-color .25s, background .25s;
+  }
+  .loop-step h4 { margin: 0 0 3px; font: 700 12px var(--mono); letter-spacing: .04em; color: #e2e8f0; display: flex; justify-content: space-between; }
+  .loop-step h4 small { font-weight: 400; color: #64748b; letter-spacing: 0; }
+  .loop-step p { margin: 0; font-size: 11.5px; line-height: 1.45; color: #94a3b8; }
+  .loop-step p b { color: #f8fafc; font-family: var(--mono); font-weight: 600; }
+  .loop-step.s1 { border-left-color: #ef4444; }
+  .loop-step.s2 { border-left-color: #f59e0b; }
+  .loop-step.s3 { border-left-color: #34d399; }
+  .loop-step.flash { background: #13233a; }
+  .try { margin: 4px 0 0; padding-left: 18px; font-size: 11.5px; color: #94a3b8; line-height: 1.5; }
+  .try li { margin: 3px 0; }
+  .try button { font-size: 11px; padding: 1px 7px; margin-left: 4px; }
+  .switch-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0; padding: 8px 10px; background: #0c121e; border: 1px solid #1e293b; border-radius: 6px; font-size: 12px; }
+  .switch-row button.on { background: #064e3b; border-color: #34d399; color: #6ee7b7; }
+  .switch-row button.off { background: #4c1219; border-color: #ef4444; color: #fecaca; }
+  .vs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .vs .tcard { cursor: default; margin: 0; }
+  .vs .big { font: 700 20px var(--mono); }
+  .vs .row { display: flex; justify-content: space-between; font-size: 11px; color: #94a3b8; margin-top: 3px; }
+  .vs .row b { font-family: var(--mono); color: #e2e8f0; font-weight: 600; }
+  .gloss dt { font-weight: 700; color: #e2e8f0; font-size: 11.5px; margin-top: 6px; }
+  .gloss dd { margin: 1px 0 0 0; font-size: 11.5px; color: #94a3b8; line-height: 1.4; }
+  .real img { width: 100%; border-radius: 6px; border: 1px solid #1e293b; margin-top: 6px; background: #fff; }
+  .mapbar { position: absolute; right: 8px; top: 30px; display: flex; gap: 5px; z-index: 2; }
+  .mapbar .pill-btn { font-size: 10.5px; padding: 3px 8px; }
+  .chart.tall { height: 150px; }
+</style>
+</head>
+<body class="track-page">
+<header class="topbar">
+  <div class="brand">
+    <span class="dot"></span>
+    <div>
+      <div class="title">Stage 2: SLAM — <span class="sub">where am I, and what is around me?</span></div>
+      <div class="subtitle">A real EKF-SLAM you can watch step by step · simulated lunar rover, no GPS, no map at the start</div>
+    </div>
+  </div>
+  <div class="controls">
+    <nav class="lab-nav" aria-label="Suite Navigation">
+      <a class="lab-link" href="index.html" title="Stage 1: EKF / UKF / PF State Estimation">1. Find Ourselves (State Est)</a>
+      <a class="lab-link active" href="slam.html" title="Stage 2: SLAM">2. See &amp; Map (SLAM)</a>
+      <a class="lab-link" href="track.html" title="Stage 3: Occlusion Multi-Object Tracking">3. Track What We Lose (MOT)</a>
+      <a class="lab-link" href="policy.html" title="Stage 4: imitation-learning policies">4. Act (Multimodal Policy Lab)</a>
+    </nav>
+    <label>Scenario <select id="scenario"></select></label>
+    <label>Seed <input id="seed" type="number" value="3" min="1" max="9999" style="width:58px" /></label>
+    <label>Speed <div class="seg" id="speed"></div></label>
+    <button id="play" class="primary" data-state="running">⏸ Pause</button>
+    <button id="stepBtn" title="Pause and run one camera frame: predict, observe, correct">⏭ One step</button>
+    <button id="reset">↺ Reset</button>
+    <button id="togR" title="Show or hide the right panel">📊 Scores</button>
+    <span id="clock" class="clock">T+000.0 s</span>
+  </div>
+</header>
+
+<main class="tgrid">
+  <aside class="panel left">
+    <div class="story-banner">
+      <b>SLAM</b> = <b>S</b>imultaneous <b>L</b>ocalization <b>a</b>nd <b>M</b>apping. The rover has no GPS and no map.
+      To know where it is, it needs a map; to draw a map, it needs to know where it is. SLAM does both at once,
+      in a loop that runs every tenth of a second:
+    </div>
+
+    <div class="sec">The SLAM loop, live <span class="hint">updates every camera frame</span></div>
+    <div id="loop-predict" class="loop-step s1">
+      <h4>1 · PREDICT <small>wheels</small></h4>
+      <p id="txt-predict"></p>
+    </div>
+    <div id="loop-observe" class="loop-step s2">
+      <h4>2 · OBSERVE <small>camera</small></h4>
+      <p id="txt-observe"></p>
+    </div>
+    <div id="loop-correct" class="loop-step s3">
+      <h4>3 · CORRECT <small>compare and fix</small></h4>
+      <p id="txt-correct"></p>
+    </div>
+    <label class="chk"><input id="chk-pause-loop" type="checkbox" /> Pause at the next loop closure</label>
+
+    <div class="sec">Try this</div>
+    <ol class="try">
+      <li>Watch the blue ellipse around the rover in the map below: it is how unsure SLAM is. It grows on the far side of the loop and snaps small when the rover recognises old rocks (a <b>loop closure</b>). <button id="try-loop">Show me</button></li>
+      <li>Turn the camera off. SLAM becomes wheels-only and drifts like the red rover. <button id="try-cam">Camera off</button></li>
+      <li>Make the wheels slip 20%. Red gets lost fast; blue keeps correcting. <button id="try-slip">Slip 20%</button></li>
+      <li>Drop the sun to 3°. Shadows hide rock features, so there are fewer checks and a bigger ellipse. <button id="try-sun">Sun 3°</button></li>
+      <li>In the map, switch <i>Map by</i> to <b>Wheels only</b>: the same sensor data, drawn from a wrong position, smears the rocks.</li>
+    </ol>
+
+    <div class="sec">Knobs</div>
+    <div class="switch-row">
+      <span>📷 Camera corrections</span>
+      <button id="btn-cam" class="on">ON</button>
+    </div>
+    <div class="slider-row">
+      <div class="slider-head"><span>🛞 Wheel slip</span><b id="val-slip">6%</b></div>
+      <input id="sl-slip" type="range" min="0" max="0.25" step="0.01" value="0.06" />
+      <div style="font-size:10.5px;color:#64748b">Loose regolith: the wheels report more motion than happened, and the heading creeps.</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-head"><span>📷 Camera noise</span><b id="val-noise">1.0×</b></div>
+      <input id="sl-noise" type="range" min="0.5" max="4" step="0.1" value="1" />
+      <div style="font-size:10.5px;color:#64748b">Range error grows with distance squared (stereo); bearing error about 0.5°.</div>
+    </div>
+    <div class="slider-row">
+      <div class="slider-head"><span>☀️ Sun above the horizon</span><b id="val-sun">20°</b></div>
+      <input id="sl-sun" type="range" min="1" max="45" step="1" value="20" />
+      <div style="font-size:10.5px;color:#64748b">Lab assumption: features in shadow are found less often as the sun drops.</div>
+    </div>
+
+    <div class="sec" style="margin-top:10px">This scenario</div>
+    <p id="scenario-desc" class="prose"></p>
+  </aside>
+
+  <section class="center3d">
+    <canvas id="glAll" class="gl-shared"></canvas>
+    <div id="mapwrap" class="mapwrap">
+      <canvas id="ov3d" class="ov"></canvas>
+      <div id="load-badge" class="load-badge">Loading the 3-D scene…</div>
+      <div class="hud top-left">
+        <div class="hud-row"><b>Reality (3-D)</b>&nbsp;<span id="hud-active"></span></div>
+        <div class="hud-row legend">
+          <span><i class="sw" style="background:#e2e8f0"></i>Where it really went</span>
+          <span><i class="sw" style="background:#38bdf8"></i>Where SLAM thinks it went</span>
+          <span><i class="sw" style="background:#ef4444"></i>Where the wheels think it went</span>
+          <span><i class="sw" style="background:#34d399"></i>Loop closure</span>
+        </div>
+      </div>
+      <div class="hud top-right">
+        <button id="btnRays" class="pill-btn on" title="Lines from the camera to the features it is looking at">⚡ Camera rays: on</button>
+        <button id="btnFrustums" class="pill-btn" title="Camera pyramids along the path">📐 Camera poses: off</button>
+        <button id="btnStruts" class="pill-btn" title="Red lines from the true position to SLAM's belief">📏 Error lines: off</button>
+        <button id="btnAllPaths" class="pill-btn on" title="Show the wheels-only path too">🧭 Wheels path: on</button>
+        <button id="btnFollow" class="pill-btn" title="Keep the rover in the middle">🎥 Follow: off</button>
+        <button id="btn-reset-cam" class="pill-btn">↺ View</button>
+      </div>
+      <div class="hud bot-left">
+        <span class="hint-keys"><b>Click the ground</b> to send the rover there · <b>WASD / arrows</b> drive · <b>drag</b> orbit · <b>scroll</b> zoom</span>
+      </div>
+    </div>
+
+    <div class="cam-strip">
+      <div id="camwrap" class="camwrap">
+        <canvas id="ovcam" class="ov"></canvas>
+        <div class="cam-title">📷 WHAT THE CAMERA SEES — <span style="color:#34d399">□ known: a check</span> · <span style="color:#f59e0b">◇ new: added to map</span> · <span style="color:#ef4444">✕ missed</span></div>
+      </div>
+      <div class="uncwrap" style="position:relative;background:#050811;border-left:1px solid #1e293b">
+        <div class="cam-title">🧠 THE ROVER'S MIND — its own map</div>
+        <div class="mapbar">
+          <button id="btnMapBy" class="pill-btn on" title="Whose map to draw">Map by: SLAM</button>
+          <button id="btnTruth" class="pill-btn on" title="Overlay the truth (the rover can't see this)">Truth overlay: on</button>
+        </div>
+        <canvas id="poseMap" style="width:100%;height:100%;display:block"></canvas>
+      </div>
+    </div>
+  </section>
+
+  <aside class="panel right">
+    <div class="sec">How lost is it? <span class="hint">belief vs truth</span></div>
+    <div id="vs" class="vs"></div>
+
+    <div class="sec">Position error over time (m)</div>
+    <canvas id="chAte" class="chart tall"></canvas>
+    <p class="prose" style="margin-top:0"><span style="color:#38bdf8">━</span> SLAM error · <span style="color:#38bdf8">┅</span> SLAM's own ±2σ · <span style="color:#ef4444">━</span> wheels-only error. An honest filter keeps its error under its own ±2σ line.</p>
+
+    <div class="sec">What just happened</div>
+    <div id="slam-feed" class="feed"></div>
+
+    <div class="sec">Words</div>
+    <dl class="gloss">
+      <dt>Pose</dt><dd>Where the rover is and which way it faces: x, y and heading.</dd>
+      <dt>Landmark</dt><dd>A rock feature the camera can find again. Its position goes into the map.</dd>
+      <dt>Uncertainty ellipse (±2σ)</dt><dd>The area the filter is 95% sure the rover (or a landmark) is in. Bigger = less sure.</dd>
+      <dt>Innovation</dt><dd>The surprise: measured minus expected. Zero means the map and pose already agree.</dd>
+      <dt>Loop closure</dt><dd>Recognising a place seen long ago. Old landmarks are well known, so the drifted pose gets pulled back.</dd>
+      <dt>Drift</dt><dd>Error that keeps adding up when nothing checks it, like adding wheel turns.</dd>
+    </dl>
+
+    <div class="sec">What this page simplifies</div>
+    <p class="prose">2-D only (x, y, heading). The camera is told which landmark it sees; a real rover must recognise features (data association), which is the hard part of a loop closure. EKF-SLAM keeps every landmark in one matrix, so it slows as the map grows. Modern SLAM keeps a graph of keyframes and also bends the past path at a loop closure; here only the present pose and the map move.</p>
+
+    <div class="sec">Real camera SLAM, measured</div>
+    <div class="real prose">
+      VGGT-SLAM (1 camera) and ORB-SLAM3 (2 cameras) run on this lab's rendered rover drives, 5 drives per sun angle, scored against exact ground truth. In simulation, two cameras were 15 to 45 times more accurate, and both kept working at a 2° sun.
+      <img src="assets/slam/summary_mono_vs_stereo.png" alt="Error as % of distance: VGGT-SLAM 4.5%, 3.1%, 8.7% and ORB-SLAM3 0.1%, 0.2%, 0.2% at sun 30, 7 and 2 degrees" />
+      <span style="font-size:10.5px">Details: <code>slam/README.md</code>, runs in <code>slam/runs/v5</code> and <code>v6</code>.</span>
+    </div>
+  </aside>
+</main>
+
+<script type="module" src="src/ui/slam-app.js"></script>
+</body>
+</html>
