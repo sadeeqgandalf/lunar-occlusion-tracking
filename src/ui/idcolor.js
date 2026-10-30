@@ -34,3 +34,5 @@ export const STRIPES = [
 ];
 export const stripeOf = (personId) => STRIPES[(personId - 1) % STRIPES.length];
 export const personName = (personId) => `P${personId}`;
+/** Name of a simulated target: astronauts P1, P2…; Lunar Terrain Vehicles LTV5… (same numbering). */
+export const targetName = (t) => (t.kind === 'vehicle' ? 'LTV' : 'P') + t.id;

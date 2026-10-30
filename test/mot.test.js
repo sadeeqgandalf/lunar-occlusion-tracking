@@ -218,3 +218,40 @@ test('event camera: sees motion, not presence; default camera results are unchan
   const base = new MotSession({ scenario: 'boulders', seed: 8 }).run(60).summaries().map((r) => r.idsw);
   assert.deepEqual(base, new MotSession({ scenario: 'boulders', seed: 8, eyes: 'camera' }).run(60).summaries().map((r) => r.idsw));
 });
+
+test('ltv scenario: vehicles drive like cars, keep clear of rocks without the safety net, and reach worksites', async () => {
+  const { VEHICLE } = await import('../src/mot/world.js');
+  for (const seed of [3, 8]) {
+    const s = new MotSession({ scenario: 'ltv', seed });
+    const cars = s.world.targets.filter((t) => t.kind === 'vehicle'), parks = cars.map(() => 0);
+    assert.equal(cars.length, 2);
+    let hidden = 0;
+    for (let i = 0; i < 1500; i++) {
+      const was = cars.map((c) => c.pause > 0);
+      s.step();
+      cars.forEach((c, k) => {
+        assert.ok(Math.abs(c.w) <= Math.abs(c.v) / VEHICLE.minTurnR + 1e-9, 'turns tighter than a car can');
+        // the push-out in _drive is a safety net; the planner + arc check must keep 0.2 m of clearance on their own
+        for (const b of s.world.boulders) assert.ok(Math.hypot(c.x - b.x, c.y - b.y) >= b.r + VEHICLE.rt + 0.2, `seed ${seed}: brushed a rock`);
+        if (c.pause > 0 && !was[k]) parks[k]++;
+        if (c.vis.inFov && c.vis.visFrac < 0.25) hidden++;
+      });
+    }
+    assert.ok(parks.every((n) => n >= 3), `seed ${seed}: worksites reached in 150 s: ${parks}`);
+    assert.ok(hidden > 0, 'vehicles never went behind cover');
+  }
+});
+
+test('vehicles (and the driving rover) never drive through each other, and none gets stuck', () => {
+  for (const scenario of ['ltv', 'drive']) for (const seed of [1, 2]) {
+    const s = new MotSession({ scenario, seed }), w = s.world;
+    const cars = [...w.targets.filter((t) => t.kind === 'vehicle'), ...(w.rover ? [w.rover] : [])], trips = cars.map(() => 0), last = cars.map(() => null);
+    for (let i = 0; i < 1500; i++) {
+      s.step();
+      for (let a = 0; a < cars.length; a++) for (let b = a + 1; b < cars.length; b++)
+        assert.ok(Math.hypot(cars[a].x - cars[b].x, cars[a].y - cars[b].y) >= cars[a].rt + cars[b].rt - 0.01, `${scenario} seed ${seed}: vehicles overlap`);
+      cars.forEach((c, k) => { if (c.route && c.route !== last[k]) trips[k]++; last[k] = c.route; });
+    }
+    assert.ok(trips.every((n) => n >= 2), `${scenario} seed ${seed}: a vehicle is stuck (${trips})`);
+  }
+});

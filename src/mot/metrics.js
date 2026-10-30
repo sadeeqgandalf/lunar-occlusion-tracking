@@ -13,7 +13,7 @@ const TAU = 2.0, GOSPA_C = 2.0, MIN_OCC = 1.0, REACQ = 2.0, CHI2_95_2 = 5.991;
 
 export class MotMetrics {
   constructor() {
-    this.f = 0; this.gtCount = 0; this.tp = 0; this.fp = 0; this.fn = 0; this.idsw = 0; this.distSum = 0;
+    this.f = 0; this.gtCount = 0; this.tp = 0; this.fp = 0; this.fn = 0; this.idsw = 0; this.idswBy = {}; this.distSum = 0;
     this.gospaSum = 0; this.lastMatch = new Map(); this.pairCounts = new Map(); this.predCount = 0;
     this.occ = new Map(); this.events = []; this.hiddenFrames = 0; this.hiddenAlive = 0; this.hiddenCovered = 0; this.hiddenErrSum = 0;
   }
@@ -37,7 +37,7 @@ export class MotMetrics {
     a.forEach((j, i) => { if (j >= 0) { match.set(G[i].id, K[j]); usedK.add(K[j].id); } });
     for (const [gid, k] of match) {
       const prev = this.lastMatch.get(gid);
-      if (prev !== undefined && prev !== k.id) this.idsw++;
+      if (prev !== undefined && prev !== k.id) { this.idsw++; this.idswBy[gid] = (this.idswBy[gid] || 0) + 1; }
       this.lastMatch.set(gid, k.id); this.tp++; this.distSum += d(vis.find((g) => g.id === gid), k);
     }
     this.fn += vis.length - match.size; this.fp += rep.length - match.size;
@@ -93,7 +93,7 @@ export class MotMetrics {
       mota: this.gtCount ? 1 - (this.fn + this.fp + this.idsw) / this.gtCount : NaN,
       motp: this.tp ? this.distSum / this.tp : NaN,
       idf1: this.gtCount + this.predCount ? (2 * idtp) / (this.gtCount + this.predCount) : NaN,
-      idsw: this.idsw, fp: this.fp, fn: this.fn,
+      idsw: this.idsw, idswBy: this.idswBy, fp: this.fp, fn: this.fn,
       gospa: this.gospaSum / Math.max(1, this.f),
       occEvents: ev.length, occKept: kept, occKeptFrac: ev.length ? kept / ev.length : NaN,
       occByDuration: [[1, 2], [2, 5], [5, 10], [10, Infinity]].map(([a, b]) => {

@@ -6,12 +6,12 @@ import { wrapAngle, TAU } from '../core/linalg.js';
 import { isHidden, hiddenCause } from '../mot/occlusion.js';
 import { runTour } from './tour.js';
 import { lineChart } from './charts.js';
-import { idColor, idColorA, stripeOf, label, labelConfirmed, personName } from './idcolor.js';
+import { idColor, idColorA, stripeOf, label, labelConfirmed, personName, targetName } from './idcolor.js';
 import { lidarScan, turbo } from '../mot/lidarscan.js';
 
 const $ = (id) => document.getElementById(id);
 // default seed 8: a typical run (same ranking as the 20-seed average), not the best one (15) or the worst (7, 9, 16)
-const S = { heat: true, lander: false, lidar: false, eyes: 'camera', scenario: 'boulders', seed: 8, speed: 2, paused: false, sel: 3, showTruth: true, view: '3d', overrides: {}, sw: [] };
+const S = { heat: true, lander: false, lidar: false, eyes: 'camera', scenario: MOT_SCENARIOS[new URLSearchParams(location.search).get('scenario')] ? new URLSearchParams(location.search).get('scenario') : 'boulders', seed: 8, speed: 2, paused: false, sel: 3, showTruth: true, view: '3d', overrides: {}, sw: [] };
 let w3d = null, w3dLost = null; // w3dLost: a 3-D view waiting for the browser to restore its GPU context
 const COLORS = ['#4ade80', '#4cc9f0', '#ff6b6b', '#bd8cff'];
 const PLAIN = {
@@ -110,7 +110,7 @@ function updateCards() {
     const now = hid ? (held ? hidChip(label(T, kid)) : '<i style="color:#ff9aa4">lost</i>') : kid !== undefined && live.has(kid) ? idChip(label(T, kid)) : '<i style="color:var(--dim)">–</i>';
     const h = idHist[S.sel].get(g.id) || [], shown = h.length > 4 ? ['…', ...h.slice(-3).map(idChip)] : h.map(idChip);
     const sw = h.length > 1 ? ` <b style="color:#ff9aa4">${h.length - 1}✘</b>` : '';
-    return `<span class="p"><i style="background:${stripeOf(g.id).hex}"></i>${personName(g.id)}</span><span>${now}</span><span>${shown.join(' ') || '–'}${sw}</span>`;
+    return `<span class="p"><i style="background:${stripeOf(g.id).hex}"></i>${targetName(g)}</span><span>${now}</span><span>${shown.join(' ') || '–'}${sw}</span>`;
   }).join('');
   $('feed').innerHTML = feed.map((f) => `<div class="${f.cls}"><b>${f.t.toFixed(0).padStart(4)}s</b> ${f.text}</div>`).join('');
   $('clock').textContent = `T+${sess.world.t.toFixed(1).padStart(5, '0')} s`;
@@ -159,6 +159,14 @@ function drawRock(c, px, py, r, shape) {
   c.closePath();
   const g = c.createRadialGradient(px - r * 0.35, py - r * 0.35, r * 0.1, px, py, r * 1.1); g.addColorStop(0, '#8c9099'); g.addColorStop(1, '#3a3d44');
   c.fillStyle = g; c.fill(); c.strokeStyle = '#25272c'; c.lineWidth = 1.5; c.stroke();
+}
+/** Top view of a Lunar Terrain Vehicle, true size (3.6 x 2.3 m at s px/m), coloured band = true identity. */
+function drawVehicle(c, px, py, s, heading, alpha, stripe) {
+  c.save(); c.globalAlpha = alpha; c.translate(px, py); c.rotate(-heading);
+  c.fillStyle = '#2a2b2e'; for (const ax of [-1.25, 1.25]) for (const ay of [-1.15, 1.15]) c.fillRect((ax - 0.5) * s, (ay - 0.16) * s, s, 0.32 * s);
+  c.fillStyle = '#d9dadc'; c.beginPath(); c.roundRect(-1.8 * s, -1.05 * s, 3.6 * s, 2.1 * s, 0.3 * s); c.fill();
+  c.fillStyle = stripe; c.fillRect(-1.8 * s, -0.12 * s, 3.6 * s, 0.24 * s);
+  c.restore();
 }
 function drawAstronaut(c, px, py, r, heading, alpha, stripe = '#cfd2d6') {
   c.save(); c.globalAlpha = alpha; c.translate(px, py); c.rotate(-heading);
@@ -240,8 +248,14 @@ function drawMap() {
   if (S.showTruth) for (const t of w.targets) {
     const [px, py] = P(t.x, t.y), hid = !t.vis.inFov || isHidden(t.vis);
     if (t.trail.length > 1) { c.strokeStyle = '#ffffff26'; c.lineWidth = 1.5; c.setLineDash([2, 4]); c.beginPath(); t.trail.forEach(([x, y], i) => { const q = P(x, y); i ? c.lineTo(...q) : c.moveTo(...q); }); c.stroke(); c.setLineDash([]); }
-    drawAstronaut(c, px, py, r, t.h, hid ? 0.45 : 1, stripeOf(t.id).hex);
-    c.fillStyle = hid ? '#ffffff99' : '#ffffffdd'; c.font = '11px system-ui'; c.fillText(personName(t.id), px - r, py + r + 13);
+    if (t.kind === 'vehicle' && t.route) {   // the vehicle's planned route to its next worksite
+      c.strokeStyle = stripeOf(t.id).hex + '99'; c.lineWidth = 2; c.setLineDash([6, 5]); c.beginPath(); c.moveTo(px, py);
+      for (const q of t.route.slice(t.wp)) c.lineTo(...P(q.x, q.y));
+      c.stroke(); c.setLineDash([]); const [gx, gy] = P(t.goal.x, t.goal.y); c.strokeStyle = stripeOf(t.id).hex; c.strokeRect(gx - 5, gy - 5, 10, 10);
+    }
+    if (t.kind === 'vehicle') drawVehicle(c, px, py, s, t.h, hid ? 0.45 : 1, stripeOf(t.id).hex);
+    else drawAstronaut(c, px, py, r, t.h, hid ? 0.45 : 1, stripeOf(t.id).hex);
+    c.fillStyle = hid ? '#ffffff99' : '#ffffffdd'; c.font = '11px system-ui'; c.fillText(targetName(t), px - r, py + r + 13);
   }
   // camera pings this frame (orange); in training view, false alarms are tagged
   sess.last.dets.forEach((d, i) => {
@@ -353,6 +367,7 @@ function showError(where, err) {
 }
 function frame(now) {
   requestAnimationFrame(frame); // schedule first: one bad frame must never stop the loop
+  if (window.__lab?.ready) return;   // recording: once set up, the recorder renders each frame itself; nothing else may use the GPU
   try { frameBody(now); } catch (err) { showError('frame', err); }
 }
 function frameBody(now) {
@@ -459,6 +474,8 @@ const TRACK_TOUR = (api) => [
 ];
 
 wire(); newSession(); requestAnimationFrame(frame);
+// ?record: hand the session and 3-D view to an automated recorder (tools/record_drive.mjs); the page stops animating
+if (new URLSearchParams(location.search).has('record')) { S.paused = true; window.__lab = { S, get sess() { return sess; }, get w3d() { return w3d; } }; }
 // 3-D view loads on its own: if WebGL or the models are unavailable, the 2-D views keep working.
 import('./world3d.js')
   .then((m) => m.createWorld3D({ canvas: $('glAll'), mainEl: $('mapwrap'), camEl: $('camwrap'), mainOverlay: $('ov3d'), camOverlay: $('ovcam') }))

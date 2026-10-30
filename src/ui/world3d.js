@@ -5,7 +5,7 @@
 import { THREE, toV, hash, fbm, makeRenderer, fitRenderer, loadModel, starfield, drawLabels, isLost, GFX } from './three-common.js';
 import { OrbitControls } from '../../vendor/three/examples/jsm/controls/OrbitControls.js';
 import { isHidden, hiddenCause } from '../mot/occlusion.js';
-import { idColor, stripeOf, label, personName } from './idcolor.js';
+import { idColor, stripeOf, label, targetName } from './idcolor.js';
 import { lidarScan, segmentScan, turbo } from '../mot/lidarscan.js';
 
 const MAST_H = 2.2, PERSON_H = 1.8;
@@ -23,6 +23,60 @@ function makeHeight(craters) {
 }
 
 /**
+ * Regolith photometry: the Lunar-Lambert function (McEwen 1991) in place of Lambert's cos(i) for the sun:
+ *   reflectance ~ 2 L(g) mu0 / (mu0 + mu) + (1 - L(g)) mu0,   mu0 = cos(incidence), mu = cos(emission), g = phase angle
+ *   L(g) = 1 - 0.019 g + 0.000242 g^2 - 0.00000146 g^3 (g in degrees), McEwen 1996, as coded in USGS ISIS
+ *   (LunarLambertMcEwen.cpp). Lunar soil does not darken toward grazing view like a matte wall, and looks brightest
+ *   with the sun behind the viewer; Lambert gets both wrong, most of all under a low sun.
+ */
+function lunarLambert(sh) {
+  sh.fragmentShader = sh.fragmentShader.replace('#include <lights_physical_pars_fragment>',
+    THREE.ShaderChunk.lights_physical_pars_fragment.replace('vec3 irradiance = dotNL * directLight.color;', `
+	float llMu = saturate( dot( geometryNormal, geometryViewDir ) );
+	float llG = degrees( acos( clamp( dot( directLight.direction, geometryViewDir ), -1.0, 1.0 ) ) );
+	float llL = clamp( 1.0 - 0.019 * llG + 0.000242 * llG * llG - 0.00000146 * llG * llG * llG, 0.0, 1.0 );
+	vec3 irradiance = ( dotNL > 0.0 ? 2.0 * llL * dotNL / ( dotNL + llMu + 1e-4 ) + ( 1.0 - llL ) * dotNL : 0.0 ) * directLight.color;`));
+}
+
+/** Tileable regolith detail: mid-grey grains, darker pits and bright pebble specks, multiplied with the ground colour. */
+function regolithTexture(repeat) {
+  const N = 256, c = document.createElement('canvas'); c.width = c.height = N;
+  const g = c.getContext('2d'), im = g.createImageData(N, N);
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const v = 0.82 + 0.18 * (hash(x, y) - 0.5) + 0.22 * (fbm(x * 0.09, y * 0.09) - 0.5), k = 4 * (y * N + x);
+    im.data[k] = im.data[k + 1] = im.data[k + 2] = 255 * Math.min(1, Math.max(0, v)); im.data[k + 3] = 255;
+  }
+  g.putImageData(im, 0, 0);
+  for (let i = 0; i < 260; i++) {                      // pebbles: lit top, shadowed side (sun from the left, as in the scene)
+    const x = hash(i, 101) * N, y = hash(i, 202) * N, r = 0.8 + 2.6 * hash(i, 303) ** 2;
+    g.fillStyle = 'rgba(40,40,44,0.55)'; g.beginPath(); g.arc(x + r * 0.5, y, r, 0, Math.PI * 2); g.fill();
+    g.fillStyle = 'rgba(245,245,240,0.8)'; g.beginPath(); g.arc(x - r * 0.3, y, r * 0.75, 0, Math.PI * 2); g.fill();
+  }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(repeat, repeat * 0.8); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  return t;
+}
+
+/**
+ * Lunar Terrain Vehicle, built from simple shapes (no official NASA model is published yet): open two-seat chassis on
+ * four wheels, ~3.6 m long, 2.3 m wide, ~1.6 m tall. Long axis along +z, like the astronaut model, so the same yaw
+ * applies. The coloured band is its true identity, like the astronauts' suit stripes.
+ */
+function makeVehicle(stripeHex) {
+  const g = new THREE.Group(), add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; g.add(m); return m; };
+  const body = new THREE.MeshStandardMaterial({ color: 0xd9dadc, metalness: 0.5, roughness: 0.45 });
+  const dark = new THREE.MeshStandardMaterial({ color: 0x2a2b2e, roughness: 0.9 });
+  const sc = new THREE.Color(stripeHex), stripe = new THREE.MeshStandardMaterial({ color: sc, emissive: sc, emissiveIntensity: 0.35 });
+  add(new THREE.BoxGeometry(2.1, 0.28, 3.6), body, 0, 0.8, 0);                                   // chassis
+  add(new THREE.BoxGeometry(2.14, 0.1, 3.64), stripe, 0, 0.98, 0);                               // identity band
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) add(new THREE.CylinderGeometry(0.5, 0.5, 0.32, 20), dark, sx * 1.15, 0.5, sz * 1.25).rotation.z = Math.PI / 2;
+  for (const sx of [-1, 1]) add(new THREE.BoxGeometry(0.6, 0.6, 0.55), body, sx * 0.5, 1.25, -0.2); // two seats
+  add(new THREE.BoxGeometry(1.9, 0.08, 0.08), body, 0, 1.6, -0.55);                              // roll bar
+  for (const sx of [-1, 1]) add(new THREE.BoxGeometry(0.08, 0.68, 0.08), body, sx * 0.92, 1.26, -0.55);
+  add(new THREE.CylinderGeometry(0.35, 0.05, 0.12, 20), body, 0, 1.75, -1.35);                  // high-gain antenna dish
+  return g;
+}
+
+/**
  * One renderer draws both views (free 3-D view + rover camera) into two viewports of a single canvas that sits
  * behind both panels: one GPU context instead of two.
  */
@@ -30,16 +84,18 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
   const R = makeRenderer(canvas);
   const scene = new THREE.Scene(); scene.background = new THREE.Color(0x000000);
 
-  // lunar south-pole lighting: sun ~7 deg above the horizon -> long shadows; faint earthshine fill
+  // lunar south-pole lighting: sun ~7 deg above the horizon -> long shadows; neutral fill from sunlit ground
   const sun = new THREE.DirectionalLight(0xfff4e0, 3.2);
   sun.position.set(-60, 9, 25); sun.castShadow = true;
   Object.assign(sun.shadow.camera, { left: -70, right: 70, top: 70, bottom: -70, near: 1, far: 220 });
   sun.shadow.mapSize.set(2048, 2048); sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.04;
   scene.add(sun, sun.target); sun.target.position.set(0, 0, -20);
-  scene.add(new THREE.HemisphereLight(0x8fa8ff, 0x202020, 0.12));
+  // fill light in shadows: on the Moon this is sunlight scattered off nearby sunlit regolith (neutral grey, a few %
+  // of the sun), not a blue sky; earthshine is far fainter. A camera that raises its gain in shadow would show any tint.
+  scene.add(new THREE.HemisphereLight(0xc4c2be, 0x4a4946, 0.1));
 
   // stars + Earth low on the horizon (as seen from the lunar south pole)
-  scene.add(starfield(GFX.low ? 1200 : 3000));
+  const stars = starfield(GFX.low ? 1200 : 3000); scene.add(stars);
   const earth = new THREE.Mesh(new THREE.SphereGeometry(18, GFX.low ? 24 : 48, GFX.low ? 16 : 32), new THREE.MeshStandardMaterial({ color: 0x3a6ea5, emissive: 0x0c2340, roughness: 0.8 }));
   earth.position.set(140, 30, -420); scene.add(earth);
 
@@ -51,7 +107,7 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
   ]);
 
   const dyn = new THREE.Group(); scene.add(dyn);
-  let world = null, height = () => 0, people = new Map(), staticGroup = null;
+  let world = null, height = () => 0, people = new Map(), staticGroup = null, roverGroup = null;
   const pool = { ring: [], area: [], ping: [] };
 
   function setWorld(w) {
@@ -82,7 +138,25 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
       const g = 0.42 + (fbm(x * 0.6, y * 0.6) - 0.5) * 0.18; col.set([g, g, g * 0.97], i * 3);
     }
     G.setAttribute('color', new THREE.BufferAttribute(col, 3)); G.computeVertexNormals();
-    const ground = new THREE.Mesh(G, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 }));
+    // fine regolith detail (grains, pebbles, ~2 cm texels, tiled every 4 m): without it a camera sees smooth blotches
+    // and has nothing to match between frames (visual odometry / SLAM need texture, as the real surface has)
+    const gmat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, map: regolithTexture(200 / 4) });
+    // break the 4 m tiling (identical patches cause false matches in visual odometry / SLAM): a second lookup of the
+    // same texture at a golden-ratio scale, so the two patterns never line up again, times value noise on world position
+    gmat.onBeforeCompile = (sh) => {
+      lunarLambert(sh);
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec2 vWxz;')
+        .replace('#include <worldpos_vertex>', '#include <worldpos_vertex>\nvWxz = (modelMatrix * vec4(transformed, 1.0)).xz;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
+varying vec2 vWxz;
+float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h21(i), h21(i + vec2(1, 0)), f.x), mix(h21(i + vec2(0, 1)), h21(i + vec2(1, 1)), f.x), f.y); }`)
+        .replace('#include <map_fragment>', `#include <map_fragment>
+diffuseColor.rgb *= 1.6 * texture2D(map, vMapUv * 0.618 + vec2(0.37, 0.11)).rgb
+  * (0.78 + 0.22 * vnoise(vWxz * 0.9) + 0.12 * vnoise(vWxz * 3.7 + 17.0) - 0.06);`);
+    };
+    const ground = new THREE.Mesh(G, gmat);
     ground.receiveShadow = true; staticGroup.add(ground);
 
     // boulders: irregular rocks at the simulator's exact positions and heights (half-buried ellipsoids, as in the
@@ -94,19 +168,22 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
         p.setXYZ(k, v.x * n, v.y * n, v.z * n);
       }
       geo.computeVertexNormals();
-      const rock = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x7c7f86, roughness: 0.95, flatShading: true }));
+      const rmat = new THREE.MeshStandardMaterial({ color: 0x7c7f86, roughness: 0.95, flatShading: true }); rmat.onBeforeCompile = lunarLambert;   // regolith-coated
+      const rock = new THREE.Mesh(geo, rmat);
       const hb = b.h ?? Math.max(2.6, b.r * 1.15);
       rock.scale.set(b.r, hb, b.r); rock.position.copy(toV(b.x, b.y, height(b.x, b.y)));
       rock.rotation.y = hash(i, 3) * Math.PI * 2; rock.castShadow = rock.receiveShadow = true; staticGroup.add(rock);
     });
 
     // camera robot (NASA RASSOR) with a mast, and the Apollo LM as a landmark outside the work area
-    const base = toV(cam.x, cam.y, height(cam.x, cam.y));
-    if (rassor) { const r = rassor.clone(); r.position.copy(base); r.rotation.y = 0; staticGroup.add(r); }
+    // the rover is its own group, placed from w.cam every frame, so it moves when the rover drives
+    roverGroup = new THREE.Group(); staticGroup.add(roverGroup);
+    if (rassor) { const r = rassor.clone(); r.rotation.y = 0; roverGroup.add(r); }
     const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.06, MAST_H, 12), new THREE.MeshStandardMaterial({ color: 0xd9d9d9, metalness: 0.6, roughness: 0.4 }));
-    mast.position.copy(base).add(new THREE.Vector3(0, MAST_H / 2, 0)); mast.castShadow = true; staticGroup.add(mast);
+    mast.position.set(0, MAST_H / 2, 0); mast.castShadow = true; roverGroup.add(mast);
     const head = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.22, 0.28), new THREE.MeshStandardMaterial({ color: 0x222428, metalness: 0.5, roughness: 0.5 }));
-    head.position.copy(base).add(new THREE.Vector3(0, MAST_H, 0)); staticGroup.add(head);
+    head.position.set(0, MAST_H, 0); roverGroup.add(head);
+    placeRover(w);
     if (lm) {
       const m = lm.clone();
       if (w.lander) {   // the lander carries the second camera: put the module just behind the camera position
@@ -116,8 +193,9 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
       staticGroup.add(m);
     }
 
-    // people (NASA astronaut model), one per simulated target
+    // people (NASA astronaut model), one per simulated target; vehicles are drawn from simple shapes
     for (const t of w.targets) {
+      if (t.kind === 'vehicle') { const g = makeVehicle(stripeOf(t.id).hex); dyn.add(g); people.set(t.id, g); continue; }
       const g = astro ? astro.clone() : new THREE.Mesh(new THREE.CapsuleGeometry(0.35, 1.1, 4, 12), new THREE.MeshStandardMaterial({ color: 0xffffff }));
       // true identity: coloured suit stripes (waist band + helmet stripe), like real EVA suit markings
       const sc = new THREE.Color(stripeOf(t.id).hex), smat = new THREE.MeshStandardMaterial({ color: sc, emissive: sc, emissiveIntensity: 0.35 });
@@ -125,6 +203,34 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
       const crest = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.05, 0.34), smat); crest.position.y = PERSON_H - 0.02; g.add(crest);
       dyn.add(g); people.set(t.id, g);
     }
+  }
+
+  /** Rover model at the camera's pose (sim heading th; the model faces sim +y when rotation.y = 0, i.e. th = 90 deg). */
+  function placeRover(w) { roverGroup.position.copy(toV(w.cam.x, w.cam.y, height(w.cam.x, w.cam.y))); roverGroup.rotation.y = w.cam.th - Math.PI / 2; }
+
+  /**
+   * The rover camera's plain image (scene only: no ID masks, rings or labels), W x H device pixels, read straight off
+   * the canvas right after rendering (so tone mapping and colour match the lab). Call after render(), which poses
+   * everyone for this frame. Returns { px: RGBA bottom-up, W, H, pos: [x, y, z], quat: [x, y, z, w] } in three.js
+   * world coordinates (camera looks down its -z), or null if the canvas is smaller than W x H.
+   * dx shifts the camera dx metres to its right with the same orientation (right eye of a rectified stereo pair).
+   */
+  function capture(sess, W, H, exposure = null, dx = 0) {
+    const w = sess.world, pr = R.getPixelRatio(), gl = R.getContext(), exp0 = R.toneMappingExposure;
+    if (exposure) R.toneMappingExposure = exposure;   // the camera's exposure (auto-exposure is run by the recorder)
+    if (canvas.width < W || canvas.height < H) return null;
+    const cam = w.cam, eye = toV(cam.x, cam.y, height(cam.x, cam.y) + MAST_H).add(new THREE.Vector3(Math.sin(cam.th), 0, Math.cos(cam.th)).multiplyScalar(dx));
+    roverCam.position.copy(eye); roverCam.lookAt(eye.clone().add(new THREE.Vector3(Math.cos(cam.th), Math.tan(-0.05), -Math.sin(cam.th))));
+    roverCam.aspect = W / H; roverCam.fov = (2 * Math.atan(Math.tan(cam.fov / 2) / roverCam.aspect) * 180) / Math.PI; roverCam.updateProjectionMatrix();
+    // no stars: a camera exposed for sunlit regolith cannot see them (black sky, as in every Apollo surface photo)
+    const hide = [stars, ...pool.ring, ...pool.area, ...pool.ping, ...(heatMesh ? [heatMesh] : []), ...(lidarPts ? [lidarPts] : [])].filter((m) => m.visible);
+    hide.forEach((m) => { m.visible = false; });
+    R.setViewport(0, 0, W / pr, H / pr); R.setScissor(0, 0, W / pr, H / pr); R.setScissorTest(true);
+    R.render(scene, roverCam);
+    const px = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    hide.forEach((m) => { m.visible = true; }); R.toneMappingExposure = exp0;
+    const q = roverCam.quaternion;
+    return { px, W, H, pos: [eye.x, eye.y, eye.z], quat: [q.x, q.y, q.z, q.w] };
   }
 
   // ---------- cameras
@@ -189,7 +295,7 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
   function render(sess, { sel, color, showTruth, marks = [], heat = null }) {
     if (!world || sess.world !== world) { if (heatMesh) dyn.remove(heatMesh); if (lidarPts) dyn.remove(lidarPts); setWorld(sess.world); heatMesh = null; lidarPts = null; }
     const w = sess.world, col = new THREE.Color(color);
-    resetPools(); updateHeat(heat);
+    resetPools(); updateHeat(heat); placeRover(w);
     let scan = null;
     if (sess.world.lidar) {
       scan = lidarCloud(sess.world);
@@ -210,7 +316,7 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
       g.visible = true;
       const hid = !t.vis.inFov || isHidden(t.vis);
       // truth label (P1…) at the feet, so it never collides with the tracker's #tag above the head
-      if (showTruth) labels1.push({ p: toV(t.x, t.y, height(t.x, t.y) - 0.2), text: hid ? `${personName(t.id)} ${hiddenCause(t.vis) === 'shadow' ? 'in shadow' : 'behind rock'}` : personName(t.id), swatch: stripeOf(t.id).hex, color: '#ffffff', bg: '#e8ecf2cc', font: '11px system-ui', alpha: 0.9 });
+      if (showTruth) labels1.push({ p: toV(t.x, t.y, height(t.x, t.y) - 0.2), text: hid ? `${targetName(t)} ${hiddenCause(t.vis) === 'shadow' ? 'in shadow' : 'behind rock'}` : targetName(t), swatch: stripeOf(t.id).hex, color: '#ffffff', bg: '#e8ecf2cc', font: '11px system-ui', alpha: 0.9 });
     }
     // camera pings (orange discs on the ground)
     sess.last.dets.forEach((d) => {
@@ -405,5 +511,5 @@ export async function createWorld3D({ canvas, mainEl, camEl, mainOverlay, camOve
     cam.aspect = w / h; cam.updateProjectionMatrix(); return true;
   }
 
-  return { render, setWorld, ok: !!(astro && rassor), isLost: () => isLost(R) };
+  return { render, capture, setWorld, ok: !!(astro && rassor), isLost: () => isLost(R) };
 }
