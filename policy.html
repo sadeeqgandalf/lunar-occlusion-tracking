@@ -8,7 +8,7 @@
 <link rel="stylesheet" href="styles.css" />
 <script type="importmap">{ "imports": { "three": "./vendor/three/build/three.module.min.js" } }</script>
 <style>
-  :root { --expert: #e5e7eb; --bc: #ff5d6c; --ar: #ffb454; --dp: #b794f6; --left: #4cc9f0; --right: #4ade80; }
+  :root { --expert: #e5e7eb; --bc: #ff5d6c; --ar: #ffb454; --dp: #b794f6; --fp: #2dd4bf; --cv: #f472b6; --left: #4cc9f0; --right: #4ade80; }
   .topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; padding: 8px 14px;
     background: linear-gradient(#141c2e, #0e1523); border-bottom: 1px solid var(--line); }
   .topbar .brand { display: flex; align-items: center; gap: 10px; letter-spacing: 0; }
@@ -43,6 +43,8 @@
   .pol input { margin: 3px 0 0; accent-color: var(--amber); }
   .pol b { font-size: 12.5px; }
   .pol span { grid-column: 2; font-size: 11.5px; color: var(--dim); line-height: 1.4; }
+  .pol[hidden] { display: none; }
+  .try button:disabled, .seg button:disabled { opacity: 0.4; cursor: not-allowed; }
   .sw { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
 
   .seg.ck button { flex: 1; font-family: var(--mono); font-size: 11.5px; }
@@ -80,6 +82,16 @@
   .note b { color: #cbd5e1; }
   kbd { font-size: 10.5px; }
 
+  main.plab.no-left aside.left, main.plab.no-right aside.right { display: none; }
+  main.plab.no-left { grid-template-columns: minmax(0, 1fr) 360px; }
+  main.plab.no-right { grid-template-columns: 310px minmax(0, 1fr); }
+  main.plab.no-left.no-right { grid-template-columns: minmax(0, 1fr); }
+  .edge { position: absolute; top: 50%; transform: translateY(-50%); z-index: 2; width: 18px; height: 54px; padding: 0;
+    font-size: 15px; line-height: 1; border-radius: 0 6px 6px 0; background: #0a0e16d9; color: #94a3b8; }
+  .edge:hover { color: #f8fafc; border-color: var(--cyan); }
+  .edge.l { left: 0; border-left: none; }
+  .edge.r { right: 0; border-right: none; border-radius: 6px 0 0 6px; }
+
   @media (max-width: 1250px) { main.plab { grid-template-columns: 270px minmax(0, 1fr) 320px; } }
   @media (max-width: 1000px) {
     body { overflow: auto; }
@@ -95,7 +107,7 @@
     <span class="dot"></span>
     <div>
       <div class="title">Stage 4: Multimodal Policy Lab — <span>learning to drive from an expert with two answers</span></div>
-      <div class="subtitle">Three imitation-learning policies, trained on the same demonstrations, drive side by side</div>
+      <div class="subtitle">Five imitation-learning policies, trained on the same demonstrations, drive side by side</div>
     </div>
   </div>
   <div class="controls">
@@ -117,7 +129,7 @@
 <main class="plab">
   <aside class="panel left">
     <p class="lede">An expert rover passes a rock on the <b>left</b> or the <b>right</b>. With the rock dead ahead it picks
-      either side, 50/50. Three policies learn from the same <b id="nPairs">…</b> expert decisions.
+      either side, 50/50. Five policies learn from the same <b id="nPairs">…</b> expert decisions.
       Which ones learn to <b>choose</b> a side, and which one <b>averages</b> the two into the rock?</p>
 
     <h3>Try this</h3>
@@ -126,22 +138,32 @@
       <button data-try="aside">Rock off to one side</button>
       <button data-try="blur">Blurry perception</button>
       <button data-try="untrained">Before training</button>
+      <button data-try="field">Rock field</button>
+      <button data-try="fieldAhead">Three rocks dead ahead</button>
     </div>
     <p id="tryNote" class="note"></p>
 
-    <h3>World <small>or click the ground to place the rock</small></h3>
-    <label class="slider">Rock sideways offset <b id="vOff"></b>
-      <input id="off" type="range" min="-2" max="2" step="0.05" value="0" />
-      <small>0 = exactly on the straight line to the goal</small></label>
-    <label class="slider">Rock distance <b id="vDist"></b>
-      <input id="dist" type="range" min="5" max="9" step="0.1" value="7" /></label>
+    <h3>Course</h3>
+    <div class="seg ck" id="course"><button data-course="rock">Single rock</button><button data-course="field">Rock field (3 rocks)</button></div>
+    <p class="note" id="courseNote"></p>
+
+    <h3>World</h3>
+    <div id="rockSliders">
+      <label class="slider">Rock sideways offset <b id="vOff"></b>
+        <input id="off" type="range" min="-2" max="2" step="0.05" value="0" />
+        <small>0 = exactly on the straight line to the goal · or click the ground to place the rock</small></label>
+      <label class="slider">Rock distance <b id="vDist"></b>
+        <input id="dist" type="range" min="5" max="9" step="0.1" value="7" /></label>
+    </div>
+    <label class="pol" id="fieldOpt" hidden><input type="checkbox" id="ahead" /><b>All rocks dead ahead</b>
+      <span>Every rock on the lane centre: three 50/50 choices in a row. ↻ New run draws a new field.</span></label>
     <label class="slider">Perception noise σ <b id="vSig"></b>
       <input id="sig" type="range" min="0.05" max="0.4" step="0.01" value="0.05" />
       <small>error (1 std) in where the rover sees the rock, redrawn every decision</small></label>
 
     <h3>Policies</h3>
     <label class="pol"><input type="checkbox" data-show="expert" checked /><b><i class="sw" style="background:var(--expert)"></i>Expert</b>
-      <span>The teacher. Steers along the edge of the rock's keep-out circle, on one side it commits to.</span></label>
+      <span>The teacher. Steers along the edge of each rock's keep-out circle, on a side it commits to per rock.</span></label>
     <label class="pol"><input type="checkbox" data-show="bc" checked /><b><i class="sw" style="background:var(--bc)"></i>BC (regression)</b>
       <span>Predicts the 8 actions directly with a squared-error loss, so it learns their <em>average</em>.</span></label>
     <label class="pol"><input type="checkbox" data-show="ar" checked /><b><i class="sw" style="background:var(--ar)"></i>Autoregressive (transformer)</b>
@@ -151,6 +173,10 @@
       <small>1 = the learned probabilities (as scored); low = always the likeliest token</small></label>
     <label class="pol"><input type="checkbox" data-show="dp" checked /><b><i class="sw" style="background:var(--dp)"></i>Diffusion</b>
       <span>Starts from random noise and removes it in 50 steps, guided by what the rover sees.</span></label>
+    <label class="pol"><input type="checkbox" data-show="fp" checked /><b><i class="sw" style="background:var(--fp)"></i>Flow matching (transformer)</b>
+      <span>Also starts from noise, but learns straight paths to a plan, so 10 steps are enough. The action model of π0.</span></label>
+    <label class="pol"><input type="checkbox" data-show="cv" checked /><b><i class="sw" style="background:var(--cv)"></i>CVAE (latent code)</b>
+      <span>In training, an encoder squeezes the expert's side into a small code z. When driving, a random z picks a side in one network pass. The idea behind ACT.</span></label>
 
     <h3>Training checkpoint <small>epochs</small></h3>
     <div class="seg ck" id="ckpt"></div>
@@ -159,8 +185,10 @@
 
   <section class="stage">
     <div class="view">
-      <canvas id="gl" aria-label="Four rovers, one per policy, each in its own copy of the same world"></canvas>
+      <canvas id="gl" aria-label="One rover per policy, each in its own copy of the same world"></canvas>
       <canvas id="ov"></canvas>
+      <button class="edge l" id="hideL" title="Hide or show the left panel ([)">‹</button>
+      <button class="edge r" id="hideR" title="Hide or show the right panel (])">›</button>
       <div class="hud">
         <div><span class="ring"></span>vehicle centre must stay outside (obstacle + body radius)</div>
         <div><span class="fan"></span>plans the policy is considering now</div>
@@ -194,8 +222,8 @@
     <h3>Scorecard <small id="scoreCk"></small></h3>
     <table class="score">
       <thead>
-        <tr><th></th><th colspan="2" title="Rock, goal and noise drawn as in training">Random worlds</th><th colspan="3" title="Rock exactly on the line to the goal, σ = 0.05 m">Rock dead ahead</th></tr>
-        <tr><th>Policy</th><th>goal</th><th>crash</th><th>goal</th><th>crash</th><th title="Of the runs that got past the rock">left</th></tr>
+        <tr><th></th><th colspan="2" title="Rock, goal and noise drawn as in training">Random worlds</th><th colspan="3" id="aheadHead" title="Every rock exactly on the line to the goal, σ = 0.05 m">Rock dead ahead</th></tr>
+        <tr><th>Policy</th><th>goal</th><th>crash</th><th>goal</th><th>crash</th><th title="Of the rocks passed">left</th></tr>
       </thead>
       <tbody id="scoreRows"></tbody>
     </table>
@@ -206,12 +234,12 @@
 
     <h3>Training loss <small>÷ loss before training</small></h3>
     <canvas id="cvLoss" class="chart"></canvas>
-    <p class="note">Each loss is in its own units (squared error, cross-entropy, noise error), so each is shown relative to its
+    <p class="note">Each loss is in its own units (squared error, cross-entropy, noise error, velocity error, reconstruction + KL), so each is shown relative to its
       starting value. A low loss does not mean safe driving: compare BC's curve with its scorecard.</p>
 
     <h3>What this lab simplifies</h3>
     <ul class="compact">
-      <li>One rock and a flat ground; the rover sees the rock's position and size, not camera pixels.</li>
+      <li>One to three rocks on flat ground; the rover sees rock positions and sizes, not camera pixels.</li>
       <li>The expert is a geometric planner, not a human driver.</li>
       <li>Unicycle motion with no slip; the policy re-plans every 1 s and runs 4 of its 8 actions.</li>
       <li>Action tokens use FAST's cosine transform without its byte-pair encoding.</li>
@@ -223,10 +251,15 @@
       <li>Pertsch et al., <a href="https://arxiv.org/abs/2501.09747">FAST: action tokenization</a>, 2025</li>
       <li>Brohan et al., <a href="https://arxiv.org/abs/2307.15818">RT-2</a>, 2023</li>
       <li>Laskey et al., <a href="https://arxiv.org/abs/1703.09327">DART: noise injection for imitation</a>, 2017</li>
+      <li>Lipman et al., <a href="https://arxiv.org/abs/2210.02747">Flow Matching for Generative Modeling</a>, ICLR 2023</li>
+      <li>Black et al., <a href="https://arxiv.org/abs/2410.24164">π0: a vision-language-action flow model</a>, 2024</li>
+      <li>Peebles &amp; Xie, <a href="https://arxiv.org/abs/2212.09748">DiT</a> (adaLN-Zero conditioning), ICCV 2023</li>
+      <li>Zhao et al., <a href="https://arxiv.org/abs/2304.13705">ACT: action chunking with transformers</a> (CVAE policy), RSS 2023</li>
+      <li>Sohn et al., <a href="https://papers.nips.cc/paper/2015/hash/8d55a249e6baa5c06772297520da2051-Abstract.html">Conditional VAE</a>, NeurIPS 2015</li>
       <li>Nichol &amp; Dhariwal, <a href="https://arxiv.org/abs/2102.09672">Improved DDPM</a> (cosine schedule), 2021</li>
       <li>ETH Zürich, <a href="https://cvg.ethz.ch/lectures/Robot-Learning/">Robot Learning</a> (Oier Mees), 2026: imitation learning, tokenized actions, diffusion policies</li>
     </ul>
-    <p class="note">Reproduce: <code>python policy/train_eval.py</code> · tests: <code>npm test</code>, <code>pytest policy</code> · keys: <kbd>Space</kbd> pause, <kbd>N</kbd> next decision, <kbd>R</kbd> new run</p>
+    <p class="note">Reproduce: <code>python policy/train_eval.py</code> · tests: <code>npm test</code>, <code>pytest policy</code> · keys: <kbd>Space</kbd> pause, <kbd>N</kbd> next decision, <kbd>R</kbd> new run, <kbd>[</kbd> <kbd>]</kbd> hide panels</p>
   </aside>
 </main>
 

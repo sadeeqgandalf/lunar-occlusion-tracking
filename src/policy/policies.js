@@ -1,5 +1,5 @@
-// The three learned policies, running the exact float16 weights exported by policy/train_eval.py.
-// A port of policy/model.py, policy/diffusion.py and policy/tokenizer.py (checked by test/policy.test.js).
+// The five learned policies, running the exact float16 weights exported by policy/train_eval.py.
+// A port of policy/model.py, policy/diffusion.py, policy/flow.py, policy/cvae.py and policy/tokenizer.py (checked by test/policy.test.js).
 import { H, fromUnit, toUnit } from './sim.js';
 
 // ---------- weights ----------
@@ -9,7 +9,7 @@ const f16 = (h) => {
   return e === 0 ? s * 2 ** -14 * (m / 1024) : e === 31 ? (m ? NaN : s * Infinity) : s * 2 ** (e - 15) * (1 + m / 1024);
 };
 
-/** Split one checkpoint's float16 blob into {bc, ar, dp} maps of name -> {data: Float32Array, shape}. */
+/** Split one checkpoint's float16 blob into {bc, ar, dp, fp, cv} maps of name -> {data: Float32Array, shape}. */
 export function unpack(manifest, buffer) {
   const raw = new Uint16Array(buffer), out = {};
   let at = 0;
@@ -40,10 +40,11 @@ function linear(x, W, b) {
 const map = (x, f) => x.map(f);
 const silu = (x) => map(x, (v) => v / (1 + Math.exp(-v)));
 const gelu = (x) => map(x, (v) => 0.5 * v * (1 + Math.tanh(0.7978845608 * (v + 0.044715 * v ** 3))));
+/** LayerNorm; without g and b it is the plain normalisation (elementwise_affine=False). */
 function layerNorm(x, g, b) {
   const n = x.length, mu = x.reduce((a, v) => a + v, 0) / n;
   const sd = Math.sqrt(x.reduce((a, v) => a + (v - mu) ** 2, 0) / n + 1e-5);
-  return map(x, (v, i) => ((v - mu) / sd) * g.data[i] + b.data[i]);
+  return map(x, (v, i) => ((v - mu) / sd) * (g ? g.data[i] : 1) + (b ? b.data[i] : 0));
 }
 const add = (a, b) => map(a, (v, i) => v + b[i]);
 const normalize = (P, o) => Float32Array.from(o, (v, i) => (v - P['norm.mean'].data[i]) / P['norm.std'].data[i]);
@@ -96,20 +97,21 @@ export function bcAct(P, o) {
 
 // ---------- token transformer ----------
 
-function attention(P, pre, xs) {
+function attention(P, pre, xs, causal = true) {
   const W = P[`${pre}.in_proj_weight`], B = P[`${pre}.in_proj_bias`], d = xs[0].length, heads = 4, dh = d / heads;
   const qkv = xs.map((x) => linear(x, W, B));
   return xs.map((_, i) => {
     const out = new Float32Array(d);
     for (let h = 0; h < heads; h++) {
       const o = h * dh, score = [];
-      for (let j = 0; j <= i; j++) {      // causal: position i attends to 0..i
+      const last = causal ? i : xs.length - 1;   // causal: position i attends to 0..i
+      for (let j = 0; j <= last; j++) {
         let s = 0;
         for (let c = 0; c < dh; c++) s += qkv[i][o + c] * qkv[j][d + o + c];
         score.push(s / Math.sqrt(dh));
       }
       const p = softmax(score);
-      for (let j = 0; j <= i; j++) for (let c = 0; c < dh; c++) out[o + c] += p[j] * qkv[j][2 * d + o + c];
+      for (let j = 0; j <= last; j++) for (let c = 0; c < dh; c++) out[o + c] += p[j] * qkv[j][2 * d + o + c];
     }
     return linear(out, P[`${pre}.out_proj.weight`], P[`${pre}.out_proj.bias`]);
   });
@@ -185,4 +187,50 @@ export function dpSample(P, o, schedule, rng, keep = []) {
   const chunk = toChunk(x);
   if (keep.includes(0)) snaps[0] = chunk;
   return { chunk, snaps };
+}
+
+// ---------- flow matching ----------
+
+/** Velocity of a unit chunk x (flat, length 2H) at time t in [0, 1]: one token per action, adaLN-Zero blocks. */
+export function fpVelocity(P, x, t, o) {
+  const d = P['pos'].shape[1], lin = (v, name) => linear(v, P[`${name}.weight`], P[`${name}.bias`]);
+  const c = add(lin(silu(lin(normalize(P, o), 'obs_in.0')), 'obs_in.2'), lin(silu(lin(stepEmbedding(1000 * t, d), 'time.1')), 'time.3'));
+  let xs = Array.from({ length: H }, (_, i) => add(lin(x.subarray(2 * i, 2 * i + 2), 'inp'), P['pos'].data.subarray(i * d, (i + 1) * d)));
+  for (let b = 0; P[`blocks.${b}.ada.weight`]; b++) {
+    const p = `blocks.${b}`, ada = lin(silu(c), `${p}.ada`), part = (k) => ada.subarray(k * d, (k + 1) * d);
+    const [s1, b1, g1, s2, b2, g2] = [0, 1, 2, 3, 4, 5].map(part);
+    const mod = (v, s, sh) => map(layerNorm(v), (u, i) => u * (1 + s[i]) + sh[i]);
+    const a = attention(P, `${p}.attn`, xs.map((v) => mod(v, s1, b1)), false);
+    xs = xs.map((v, i) => map(v, (u, j) => u + g1[j] * a[i][j]));
+    xs = xs.map((v) => { const m = lin(gelu(lin(mod(v, s2, b2), `${p}.mlp.0`)), `${p}.mlp.2`); return map(v, (u, j) => u + g2[j] * m[j]); });
+  }
+  return Float32Array.from(xs.flatMap((v) => [...lin(layerNorm(v), 'out')]));
+}
+
+/** Euler integration from noise (t = 0) to a plan (t = 1); keep = step indices whose chunk is returned too. */
+export function fpSample(P, o, steps, rng, keep = []) {
+  let x = Float32Array.from({ length: 2 * H }, () => rng.gauss());
+  const snaps = {};
+  for (let i = 0; i < steps; i++) {
+    if (keep.includes(i)) snaps[i] = toChunk(x);
+    const v = fpVelocity(P, x, i / steps, o);
+    x = map(x, (u, j) => u + v[j] / steps);
+  }
+  const chunk = toChunk(x);
+  if (keep.includes(steps)) snaps[steps] = chunk;
+  return { chunk, snaps };
+}
+
+// ---------- CVAE ----------
+
+/** Decoder only (the encoder is used in training): chunk from the observation and a latent code z. */
+export function cvDecode(P, o, z) {
+  const lin = (v, i) => linear(v, P[`decoder.${i}.weight`], P[`decoder.${i}.bias`]);
+  return toChunk(lin(silu(lin(silu(lin(Float32Array.from([...normalize(P, o), ...z]), 0)), 2)), 4));
+}
+
+/** A fresh code z ~ N(0, I) for every chunk. */
+export function cvAct(P, o, rng) {
+  const zDim = P['decoder.0.weight'].shape[1] - o.length;
+  return cvDecode(P, o, Array.from({ length: zDim }, () => rng.gauss()));
 }

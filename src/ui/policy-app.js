@@ -1,8 +1,8 @@
-// Multimodal Policy Lab page: four copies of one world, one per policy, driven live by the exported networks.
+// Multimodal Policy Lab page: one copy of the same world per policy, driven live by the exported networks.
 import { THREE, toV, fbm, makeRenderer, fitRenderer, loadModel, makeEnvironment, starfield, drawLabels } from './three-common.js';
 import { OrbitControls } from '../../vendor/three/examples/jsm/controls/OrbitControls.js';
-import { DT, H, EXEC, GOAL_X, GOAL_TOL, ROVER_R, W_MAX, Episode, makeExpert, makeRng, chunkPath } from '../policy/sim.js';
-import { unpack, bcAct, arSample, dpSample, cosineSchedule, tokenValue, VOCAB } from '../policy/policies.js';
+import { DT, H, EXEC, GOAL_TOL, ROVER_R, W_MAX, FIELD_ROCKS, Episode, makeExpert, makeRng, chunkPath, singleWorld, fieldWorld } from '../policy/sim.js';
+import { unpack, bcAct, arSample, dpSample, fpSample, cvAct, cosineSchedule, tokenValue, VOCAB } from '../policy/policies.js';
 
 const $ = (id) => document.getElementById(id);
 const POLICIES = [
@@ -10,16 +10,24 @@ const POLICIES = [
   { key: 'bc', name: 'BC (regression)', color: '#ff5d6c' },
   { key: 'ar', name: 'Autoregressive', color: '#ffb454' },
   { key: 'dp', name: 'Diffusion', color: '#b794f6' },
+  { key: 'fp', name: 'Flow matching', color: '#2dd4bf' },
+  { key: 'cv', name: 'CVAE', color: '#f472b6' },
 ];
-const LANE_GAP = 8;                      // m between the four copies of the world
-const FAN = 12;                          // plans sampled per decision by the two sampling policies
+const LANE_GAP = 8;                      // m between the copies of the world
+const FAN = 12;                          // plans sampled per decision by the sampling policies
 const SNAPS = [49, 25, 8, 0];            // diffusion steps shown in the noise-to-plan strip
 const ROCK_R = 1.2;
-const laneX = (i) => (i - 1.5) * LANE_GAP;
+const COURSES = {   // weights, scores and a camera that frames the whole course
+  rock: { dir: 'policy/weights', results: 'policy/results.json', camera: [0, 31, 16], target: [0, 0, -8] },
+  field: { dir: 'policy/weights_field', results: 'policy/results_field.json', camera: [0, 40, 12], target: [0, 0, -17] },
+};
+const MID = (POLICIES.length - 1) / 2;
+const laneX = (i) => (i - MID) * LANE_GAP;
 /** Lane i, simulator point (x forward, y left) -> ground (gx, gy) used by toV. */
 const ground = (i, x, y) => [laneX(i) - y, x];
 
 const S = {
+  course: 'rock', fieldAhead: false, data: {},
   off: 0, dist: 7, sigma: 0.05, temp: 1, ckpt: null, speed: 1,
   show: Object.fromEntries(POLICIES.map((p) => [p.key, true])),
   paused: false, run: 0, steps: 0, acc: 0, restartAt: null,
@@ -28,17 +36,20 @@ const S = {
 
 // ---------------------------------------------------------------- run control
 
-function world() { return { rockX: S.dist, rockY: S.off, rockR: ROCK_R, goalY: 0, sigma: S.sigma }; }
+function world(seed) {
+  return S.course === 'field' ? fieldWorld(makeRng(seed * 13 + 5), S.sigma, S.fieldAhead)
+    : singleWorld({ rockX: S.dist, rockY: S.off, rockR: ROCK_R, goalY: 0, sigma: S.sigma });
+}
 
 function newRun() {
   S.run++; S.steps = 0; S.acc = 0; S.restartAt = null;
-  const seed = 1000 + S.run, w = world();
+  const seed = 1000 + S.run, w = world(seed);
   S.lanes = POLICIES.map((p, i) => {
     const lane = { ...p, i, ep: new Episode(w, seed), rng: makeRng(seed * 7 + i), fan: [], plan: [], view: {} };
     lane.decide = deciders[p.key](lane);
     return lane;
   });
-  $('runSeed').innerHTML = `run ${S.run} · <a href="?run=${S.run}&off=${S.off}&dist=${S.dist}&sigma=${S.sigma}&temp=${S.temp}&epoch=${S.ckpt}&scene=${$('scene').value}" title="Link that replays this exact run">link</a>`;
+  $('runSeed').innerHTML = `run ${S.run} · <a href="?run=${S.run}&off=${S.off}&dist=${S.dist}&sigma=${S.sigma}&temp=${S.temp}&epoch=${S.ckpt}&scene=${$('scene').value}&course=${S.course}${S.fieldAhead ? '&ahead=1' : ''}" title="Link that replays this exact run">link</a>`;
   scene3d?.rebuildWorld(w);
   stepAll(); // first decision, so every lane shows its plan before moving
 }
@@ -60,6 +71,14 @@ const deciders = {
     const rest = Array.from({ length: FAN - 1 }, () => dpSample(S.W.dp, o, S.schedule, lane.rng).chunk);
     lane.view = { snaps: first.snaps, finals: rest, obs: o };
     return keep(lane, first.chunk, rest);
+  },
+  fp: (lane) => (o) => {
+    const s = Array.from({ length: FAN }, () => fpSample(S.W.fp, o, S.flowSteps, lane.rng).chunk);
+    return keep(lane, s[0], s.slice(1));
+  },
+  cv: (lane) => (o) => {
+    const s = Array.from({ length: FAN }, () => cvAct(S.W.cv, o, lane.rng));
+    return keep(lane, s[0], s.slice(1));
   },
 };
 
@@ -88,12 +107,13 @@ function pause(on) { S.paused = on; $('play').textContent = on ? '▶ Play' : '�
 // ---------------------------------------------------------------- weights
 
 async function loadCheckpoint(epoch) {
-  if (!S.weights.has(epoch)) {
-    $('runMsg').textContent = `Loading epoch ${epoch} weights…`;
-    const buf = await (await fetch(`policy/weights/epoch_${epoch}.bin`)).arrayBuffer();
-    S.weights.set(epoch, unpack(S.manifest, buf));
+  const key = `${S.course}:${epoch}`;
+  if (!S.weights.has(key)) {
+    $('runMsg').hidden = false; $('runMsg').textContent = `Loading epoch ${epoch} weights…`;
+    const buf = await (await fetch(`${COURSES[S.course].dir}/epoch_${epoch}.bin`)).arrayBuffer();
+    S.weights.set(key, unpack(S.manifest, buf));
   }
-  S.ckpt = epoch; S.W = S.weights.get(epoch);
+  S.ckpt = epoch; S.W = S.weights.get(key);
   document.querySelectorAll('#ckpt button').forEach((b) => b.classList.toggle('on', +b.dataset.ep === epoch));
   renderScorecard(); drawLoss();
   newRun();
@@ -107,7 +127,8 @@ function updateLive() {
   $('clock').textContent = `t = ${(S.steps * DT).toFixed(1)} s`;
   $('liveRows').innerHTML = S.lanes.map((l) => {
     const e = l.ep, w = e.chunk ? e.chunk[Math.max(0, e.k - 1)][1] : 0;
-    const side = e.passedY == null ? '—' : e.passedY > 0 ? 'left' : 'right';
+    const sides = e.passedY.filter((_, k) => e.w.rocks[k].r > 0).map((y) => (y == null ? '·' : y > 0 ? 'L' : 'R'));
+    const side = sides.length > 1 ? sides.join(' ') : { L: 'left', R: 'right', '·': '—' }[sides[0]];
     const res = e.status === 'goal' ? `✓ ${e.t.toFixed(1)} s` : e.status === 'crash' ? '✗ crashed' : e.status === 'stuck' ? 'stuck' : '…';
     return `<tr style="${S.show[l.key] ? '' : 'opacity:.35'}"><td><i class="sw" style="background:${l.color}"></i>${l.name}</td>`
       + `<td>${e.done ? '—' : `${w >= 0 ? '+' : ''}${w.toFixed(2)} rad/s`}</td><td>${side}</td><td class="st-${e.status}">${res}</td></tr>`;
@@ -126,6 +147,7 @@ function seedStat(key) {
 function renderScorecard() {
   const r = S.results, ck = r.checkpoints[S.ckpt];
   $('scoreCk').textContent = `epoch ${S.ckpt} · 400 runs per test`;
+  $('aheadHead').textContent = S.course === 'field' ? '3 rocks ahead' : 'Rock dead ahead';
   const crash = (v) => `<td class="${v >= 10 ? 'hi' : v <= 1 ? 'lo' : ''}">${v}%</td>`;
   const goal = (v) => `<td class="${v >= 99 ? 'lo' : v < 90 ? 'hi' : ''}">${v}%</td>`;
   $('scoreRows').innerHTML = POLICIES.map((p) => {
@@ -133,7 +155,7 @@ function renderScorecard() {
     return `<tr><td><i class="sw" style="background:${p.color}"></i>${p.name.split(' ')[0]}</td>${goal(s.random.goal)}${crash(s.random.crash)}`
       + `${goal(a.goal)}${crash(a.crash)}<td>${a.left == null ? '—' : `${a.left}%`}</td></tr>`;
   }).join('');
-  $('seedNote').innerHTML = `<b>Across ${r.seeds.n} training seeds</b> (epoch ${r.config.epochs}), rock dead ahead, crash mean [range]: `
+  $('seedNote').innerHTML = `<b>Across ${r.seeds.n} training seeds</b> (epoch ${r.config.epochs}), ${S.course === 'field' ? 'all rocks' : 'rock'} dead ahead, crash mean [range]: `
     + POLICIES.slice(1).map((p) => `${p.name.split(' ')[0]} ${seedStat(p.key).text}`).join(' · ')
     + `. The table shows seed 0, the one this page runs.`;
 }
@@ -303,7 +325,7 @@ async function initScene() {
   for (let i = 0; i < pos.count; i++) {
     const gx = pos.getX(i), gy = -pos.getZ(i) + 8;
     pos.setZ(i, -gy);
-    const out = Math.max(0, Math.abs(gx) - 24, -6 - gy, gy - 24) / 10;
+    const out = Math.max(0, Math.abs(gx) - 28, -6 - gy, gy - 36) / 10;
     pos.setY(i, (fbm(gx * 0.07, gy * 0.07) - 0.5) * 3 * Math.min(1, out) - 0.02);
     const c = 0.19 + (fbm(gx * 0.5, gy * 0.5) - 0.5) * 0.08 + (fbm(gx * 3, gy * 3) - 0.5) * 0.04;
     col.set([c, c, c * 0.97], i * 3);
@@ -320,18 +342,15 @@ async function initScene() {
   };
   flat(160, 110, 0x2b3a2a, 0, 8, -0.03);                                  // verge
   POLICIES.forEach((_, i) => {
-    flat(LANE_GAP - 1, 40, 0x1c1f25, laneX(i), 8, -0.01);                 // asphalt
-    for (const e of [-1, 1]) flat(0.12, 40, 0xe5e7eb, laneX(i) + e * (LANE_GAP / 2 - 0.8), 8, 0.0);
-    for (let y = -10; y < 28; y += 3) flat(0.1, 1.5, 0xfbbf24, laneX(i), y, 0.0);
+    flat(LANE_GAP - 1, 52, 0x1c1f25, laneX(i), 14, -0.01);                // asphalt
+    for (const e of [-1, 1]) flat(0.12, 52, 0xe5e7eb, laneX(i) + e * (LANE_GAP / 2 - 0.8), 14, 0.0);
+    for (let y = -10; y < 40; y += 3) flat(0.1, 1.5, 0xfbbf24, laneX(i), y, 0.0);
   });
 
   // lane furniture: dividers, start lines, goals
   const furn = new THREE.Group(); scene.add(furn);
   const dash = new THREE.LineDashedMaterial({ color: 0x3b4660, dashSize: 0.6, gapSize: 0.6 });
-  for (let i = 0; i <= 4; i++) {
-    const x = laneX(i) - LANE_GAP / 2, l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([toV(x, -3, 0.02), toV(x, GOAL_X + 3, 0.02)]), dash);
-    l.computeLineDistances(); furn.add(l);
-  }
+  const dividers = Array.from({ length: POLICIES.length + 1 }, () => { const l = new THREE.Line(new THREE.BufferGeometry(), dash); furn.add(l); return l; });
   POLICIES.forEach((p, i) => {
     const start = new THREE.Mesh(new THREE.PlaneGeometry(LANE_GAP * 0.7, 0.08).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x475569 }));
     start.position.copy(toV(laneX(i), -0.6, 0.02)); furn.add(start);
@@ -343,6 +362,9 @@ async function initScene() {
   controls.target.set(0, 0, -7.5); controls.enableDamping = true; controls.maxPolarAngle = Math.PI * 0.47;
 
   const rover = await loadModel('assets/nasa/rassor.glb', 2 * ROVER_R, 'xz');
+  const rockMat = new THREE.MeshStandardMaterial({ color: 0x8d9099, roughness: 0.95, flatShading: true });
+  const ringMat = new THREE.LineDashedMaterial({ color: 0xff5d6c, dashSize: 0.25, gapSize: 0.18 });
+  let onRoad = false;
   const perLane = POLICIES.map((p, i) => {
     const g = new THREE.Group();
     const roverMesh = rover ? rover.clone() : new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 1), new THREE.MeshStandardMaterial({ color: 0x9ca3af }));
@@ -352,30 +374,49 @@ async function initScene() {
     ring.position.y = 0.04; g.add(ring);
     const trail = new Ribbon(4 * 60 / DT, 0.16, p.color, 0.85), plan = new Ribbon(H + 1, 0.09, p.color, 1, 0.05);
     const fan = Array.from({ length: FAN }, () => makeLine(H + 1, p.color, 0.38));
-    const rock = new THREE.Mesh(rockGeometry(i * 3.1), new THREE.MeshStandardMaterial({ color: 0x8d9099, roughness: 0.95, flatShading: true }));
-    rock.castShadow = rock.receiveShadow = true;
-    const keepOut = new THREE.LineLoop(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0xff5d6c, dashSize: 0.25, gapSize: 0.18 }));
+    const rocks = Array.from({ length: FIELD_ROCKS }, (_, k) => {   // rock, its keep-out ring, and the stalled car shown on the road
+      const rock = new THREE.Mesh(rockGeometry(i * 3.1 + k * 7.7), rockMat);
+      rock.castShadow = rock.receiveShadow = true;
+      const keepOut = new THREE.LineLoop(new THREE.BufferGeometry(), ringMat);
+      const stalled = carMesh(1.75, 0.85, 0xa3aab5, '#f97316', true);      // fits inside a unit circle; scaled to the obstacle radius
+      scene.add(rock, keepOut, stalled);
+      return { rock, keepOut, stalled, used: false };
+    });
     const goal = new THREE.Group();
     goal.add(new THREE.Mesh(new THREE.RingGeometry(GOAL_TOL - 0.08, GOAL_TOL, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: 0.7 })));
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 1.6), new THREE.MeshStandardMaterial({ color: 0xd1d5db }));
     pole.position.y = 0.8; goal.add(pole);
     const flag = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.35), new THREE.MeshBasicMaterial({ color: p.color, side: THREE.DoubleSide }));
     flag.position.set(0.3, 1.42, 0); goal.add(flag);
-    const stalled = carMesh(1.75, 0.85, 0xa3aab5, '#f97316', true);      // fits inside a unit circle; scaled to the obstacle radius
-    stalled.visible = false;
-    scene.add(g, trail.mesh, plan.mesh, rock, stalled, keepOut, goal, ...fan);
-    return { g, trail, plan, fan, rock, stalled, keepOut, goal, roverMesh, egoCar };
+    scene.add(g, trail.mesh, plan.mesh, goal, ...fan);
+    return { g, trail, plan, fan, rocks, goal, roverMesh, egoCar };
   });
 
+  function showRocks() {
+    perLane.forEach((o) => o.rocks.forEach((m) => { m.rock.visible = m.used && !onRoad; m.stalled.visible = m.used && onRoad; m.keepOut.visible = m.used; }));
+  }
+
   function rebuildWorld(w) {
+    const real = w.rocks.filter((k) => k.r > 0);
     perLane.forEach((o, i) => {
-      const [gx, gy] = ground(i, w.rockX, w.rockY);
-      o.rock.scale.set(w.rockR, w.rockR, w.rockR); o.rock.position.copy(toV(gx, gy, 0));
-      o.stalled.scale.setScalar(w.rockR); o.stalled.position.copy(toV(gx, gy, 0));
-      o.keepOut.geometry.setFromPoints(Array.from({ length: 72 }, (_, k) => { const a = (k / 72) * Math.PI * 2; return toV(gx + (w.rockR + ROVER_R) * Math.cos(a), gy + (w.rockR + ROVER_R) * Math.sin(a), 0.04); }));
-      o.keepOut.computeLineDistances();
-      o.goal.position.copy(toV(...ground(i, GOAL_X, w.goalY), 0));
+      o.rocks.forEach((m, k) => {
+        const rk = real[k];
+        m.used = !!rk;
+        if (!rk) return;
+        const [gx, gy] = ground(i, rk.x, rk.y);
+        m.rock.scale.setScalar(rk.r); m.rock.position.copy(toV(gx, gy, 0));
+        m.stalled.scale.setScalar(rk.r); m.stalled.position.copy(toV(gx, gy, 0));
+        m.keepOut.geometry.setFromPoints(Array.from({ length: 72 }, (_, a) => { const t = (a / 72) * Math.PI * 2; return toV(gx + (rk.r + ROVER_R) * Math.cos(t), gy + (rk.r + ROVER_R) * Math.sin(t), 0.04); }));
+        m.keepOut.computeLineDistances();
+      });
+      o.goal.position.copy(toV(...ground(i, w.goalX, w.goalY), 0));
     });
+    dividers.forEach((l, i) => { const x = laneX(i) - LANE_GAP / 2; l.geometry.setFromPoints([toV(x, -3, 0.02), toV(x, w.goalX + 3, 0.02)]); l.computeLineDistances(); });
+    showRocks();
+  }
+
+  function frameCourse(course) {
+    camera.position.set(...COURSES[course].camera); controls.target.set(...COURSES[course].target); controls.update();
   }
 
   // click the ground: move the rock there (in whichever lane was clicked)
@@ -383,11 +424,11 @@ async function initScene() {
   let down = null;
   canvas.addEventListener('pointerdown', (e) => { down = [e.clientX, e.clientY]; });
   canvas.addEventListener('pointerup', (e) => {
-    if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
+    if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4 || S.course !== 'rock') return;
     const r = canvas.getBoundingClientRect();
     ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
     if (!ray.ray.intersectPlane(plane, hit)) return;
-    const i = Math.max(0, Math.min(3, Math.round(hit.x / LANE_GAP + 1.5)));
+    const i = Math.max(0, Math.min(POLICIES.length - 1, Math.round(hit.x / LANE_GAP + MID)));
     setWorld({ off: laneX(i) - hit.x, dist: -hit.z });
   });
 
@@ -413,19 +454,23 @@ async function initScene() {
   }
 
   function setScene(mode) {
-    const onRoad = mode === 'road';
+    onRoad = mode === 'road';
     road.visible = onRoad; groundMesh.visible = stars.visible = !onRoad;
     scene.background.set(onRoad ? 0x0b1220 : 0x020308);
-    perLane.forEach((o) => { o.rock.visible = o.roverMesh.visible = !onRoad; o.stalled.visible = o.egoCar.visible = onRoad; });
+    perLane.forEach((o) => { o.roverMesh.visible = !onRoad; o.egoCar.visible = onRoad; });
+    showRocks();
   }
 
-  scene3d = { rebuildWorld, render, setScene };
+  scene3d = { rebuildWorld, render, setScene, frameCourse };
 }
 
 // ---------------------------------------------------------------- controls
 
+const crashes = () => `BC ${seedStat('bc').mean.toFixed(0)}%, autoregressive ${seedStat('ar').mean.toFixed(1)}%, diffusion ${seedStat('dp').mean.toFixed(1)}%, flow matching ${seedStat('fp').mean.toFixed(1)}%, CVAE ${seedStat('cv').mean.toFixed(1)}%`;
 const TRY = {
-  ahead: { set: { off: 0, dist: 7, sigma: 0.05, ckpt: 'last' }, note: () => `The rock sits exactly on the line to the goal. Averaged over 5 training seeds × 400 runs, BC crashes in ${seedStat('bc').mean.toFixed(0)}% of runs, autoregressive ${seedStat('ar').mean.toFixed(1)}%, diffusion ${seedStat('dp').mean.toFixed(1)}%: BC heads for the middle of the two expert choices and turns late.` },
+  ahead: { set: { off: 0, dist: 7, sigma: 0.05, ckpt: 'last' }, note: () => `The rock sits exactly on the line to the goal. Averaged over 5 training seeds × 400 runs, the crash rates are ${crashes()}: BC heads for the middle of the two expert choices and turns late.` },
+  field: { set: { course: 'field', fieldAhead: false, sigma: 0.2, ckpt: 'last' }, note: () => 'Three rocks at random spots along a lane. Most are clearly to one side; now and then one lands near the centre line and becomes a 50/50 choice. ↻ New run draws a new field.' },
+  fieldAhead: { set: { course: 'field', fieldAhead: true, sigma: 0.05, ckpt: 'last' }, note: () => `Every rock on the lane centre: three 50/50 choices in a row, and an average of two choices hits the rock each time. Crash rates over 5 seeds × 400 runs: ${crashes()}.` },
   aside: { set: { off: 1.2, dist: 7, sigma: 0.05, ckpt: 'last' }, note: () => 'Only one side makes sense now, so every policy agrees. Averaging is harmless when the expert has one answer.' },
   blur: { set: { off: 0, dist: 7, sigma: 0.4, ckpt: 'last' }, note: () => 'Noise moves the rock off the line at every decision, which breaks the tie for BC too, and every policy keeps a wider gap. Averaging hurts most when perception is sharp.' },
   untrained: { set: { off: 0, dist: 7, sigma: 0.05, ckpt: 0 }, note: () => 'Random weights: the plans are noise. Step through the checkpoints below to watch each policy learn.' },
@@ -434,6 +479,7 @@ const TRY = {
 function syncSliders() {
   $('off').value = S.off; $('vOff').textContent = `${S.off >= 0 ? '+' : ''}${S.off.toFixed(2)} m`;
   $('dist').value = S.dist; $('vDist').textContent = `${S.dist.toFixed(1)} m`;
+  $('ahead').checked = S.fieldAhead;
   $('sig').value = S.sigma; $('vSig').textContent = `${S.sigma.toFixed(2)} m`;
   $('temp').value = S.temp; $('vTemp').textContent = S.temp.toFixed(2);
 }
@@ -444,6 +490,30 @@ function setWorld(change) {
   syncSliders(); newRun();
 }
 
+const COURSE_NOTE = {
+  rock: 'One rock between start and goal: one left-or-right choice.',
+  field: 'Three rocks along a lane, 9–10.5 m apart. The expert returns to the lane centre after each one, so a rock on the centre line is a fresh 50/50 choice. The rover sees the next two rocks and its heading on the lane.',
+};
+
+/** Switch course: its scores, its trained networks (separate from the single-rock ones), its controls and camera. */
+async function setCourse(course) {
+  S.course = course; ({ manifest: S.manifest, results: S.results } = S.data[course]);
+  S.schedule = cosineSchedule(S.results.config.diffusion_steps); S.flowSteps = S.results.config.flow_steps;
+  $('nPairs').textContent = S.results.dataset.pairs.toLocaleString('en-US');
+  document.querySelectorAll('#course button').forEach((b) => b.classList.toggle('on', b.dataset.course === course));
+  $('courseNote').textContent = COURSE_NOTE[course];
+  $('rockSliders').hidden = course !== 'rock'; $('fieldOpt').hidden = course !== 'field';
+  scene3d?.frameCourse(course);
+  await loadCheckpoint(S.manifest.checkpoints.includes(S.ckpt) ? S.ckpt : S.manifest.checkpoints.at(-1));
+}
+
+function togglePanel(side) {
+  const m = document.querySelector('main.plab');
+  m.classList.toggle(`no-${side}`);
+  $('hideL').textContent = m.classList.contains('no-left') ? '›' : '‹';
+  $('hideR').textContent = m.classList.contains('no-right') ? '‹' : '›';
+}
+
 function initControls() {
   const speeds = [0.5, 1, 2, 4];
   $('speed').innerHTML = speeds.map((s) => `<button data-s="${s}" class="${s === 1 ? 'on' : ''}">${s}×</button>`).join('');
@@ -451,6 +521,9 @@ function initControls() {
   $('play').onclick = () => pause(!S.paused);
   $('next').onclick = nextDecision;
   $('again').onclick = () => newRun();
+  $('course').onclick = (e) => { const c = e.target.dataset.course; if (c && c !== S.course) setCourse(c); };
+  $('ahead').onchange = (e) => { S.fieldAhead = e.target.checked; newRun(); };
+  $('hideL').onclick = () => togglePanel('left'); $('hideR').onclick = () => togglePanel('right');
   $('scene').onchange = (e) => { scene3d.setScene(e.target.value); $('roadNote').hidden = e.target.value !== 'road'; };
   for (const [id, key] of [['off', 'off'], ['dist', 'dist'], ['sig', 'sigma']]) $(id).oninput = (e) => setWorld({ [key]: +e.target.value });
   $('temp').oninput = (e) => { S.temp = +e.target.value; syncSliders(); };
@@ -459,12 +532,12 @@ function initControls() {
   $('ckpt').onclick = (e) => { if (e.target.dataset.ep) loadCheckpoint(+e.target.dataset.ep); };
   $('ckNote').textContent = 'Each button loads the weights saved after that many passes over the demonstrations.';
   document.querySelectorAll('[data-try]').forEach((b) => (b.onclick = async () => {
-    const t = TRY[b.dataset.try], { ckpt, ...world } = t.set;
+    const t = TRY[b.dataset.try], { ckpt, course = 'rock', ...world } = t.set;
     document.querySelectorAll('[data-try]').forEach((x) => x.classList.toggle('on', x === b));
-    $('tryNote').textContent = t.note();
     Object.assign(S, world); syncSliders();
-    const ep = ckpt === 'last' ? S.manifest.checkpoints.at(-1) : ckpt;
-    if (ep !== S.ckpt) await loadCheckpoint(ep); else newRun();
+    const ep = ckpt === 'last' ? S.data[course].manifest.checkpoints.at(-1) : ckpt;
+    if (course !== S.course) { S.ckpt = ep; await setCourse(course); } else if (ep !== S.ckpt) await loadCheckpoint(ep); else newRun();
+    $('tryNote').textContent = t.note();
     pause(false);
   }));
   addEventListener('keydown', (e) => {
@@ -472,23 +545,32 @@ function initControls() {
     if (e.code === 'Space') { e.preventDefault(); pause(!S.paused); }
     else if (e.key === 'n' || e.key === 'N') nextDecision();
     else if (e.key === 'r' || e.key === 'R') newRun();
+    else if (e.key === '[') togglePanel('left');
+    else if (e.key === ']') togglePanel('right');
   });
 }
 
 // ---------------------------------------------------------------- main loop
 
 async function boot() {
-  [S.manifest, S.results] = await Promise.all(['policy/weights/manifest.json', 'policy/results.json'].map((u) => fetch(u).then((r) => r.json())));
-  S.schedule = cosineSchedule(S.results.config.diffusion_steps);
+  const get = (u) => fetch(u).then((r) => { if (!r.ok) throw new Error(`${u}: ${r.status}`); return r.json(); });
+  const load = async (c) => { const [manifest, results] = await Promise.all([get(`${COURSES[c].dir}/manifest.json`), get(COURSES[c].results)]); S.data[c] = { manifest, results }; };
+  await load('rock');
+  await load('field').catch(() => document.querySelectorAll('[data-course="field"], [data-try^="field"]').forEach((b) => {
+    b.disabled = true; b.title = 'Rock-field networks not trained yet: python policy/train_eval.py --course field';
+  }));
+  ({ manifest: S.manifest, results: S.results } = S.data.rock);
   // shareable runs: ?run=37&off=0&dist=7&sigma=0.05&epoch=60&scene=road reproduces exactly what was on screen
   const q = new URLSearchParams(location.search), num = (k) => (q.has(k) && Number.isFinite(+q.get(k)) ? +q.get(k) : null);
   if (num('run') != null) S.run = Math.max(0, Math.round(num('run')) - 1);
   for (const [k, key] of [['off', 'off'], ['dist', 'dist'], ['sigma', 'sigma'], ['temp', 'temp']]) if (num(k) != null) S[key] = num(k);
-  $('nPairs').textContent = S.results.dataset.pairs.toLocaleString('en-US');
+  S.fieldAhead = q.get('ahead') === '1';
   syncSliders(); initControls();
   await initScene();
   if (q.get('scene') === 'road') { $('scene').value = 'road'; $('scene').onchange({ target: $('scene') }); }
-  await loadCheckpoint(S.manifest.checkpoints.includes(num('epoch')) ? num('epoch') : S.manifest.checkpoints.at(-1));
+  const course = q.get('course') === 'field' && S.data.field ? 'field' : 'rock';
+  S.ckpt = S.data[course].manifest.checkpoints.includes(num('epoch')) ? num('epoch') : null;
+  await setCourse(course);
   let last = performance.now();
   const frame = (now) => {
     requestAnimationFrame(frame);

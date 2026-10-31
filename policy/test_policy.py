@@ -15,8 +15,7 @@ def test_expert_never_crashes_even_with_steering_noise():
 
 def test_expert_takes_both_sides_when_the_rock_is_dead_ahead():
     gen = torch.Generator().manual_seed(0)
-    w = sim.sample_worlds(400, gen)
-    w["rock_y"] = w["goal_y"] * w["rock_x"] / sim.GOAL_X
+    w = sim.on_the_line(sim.sample_worlds(400, gen))
     left = (sim.rollout(sim.Expert(gen), w, gen)["passed_y"] > 0).float().mean()
     assert 0.4 < left < 0.6
 
@@ -34,3 +33,11 @@ def test_tokenizers_round_trip_and_dct_is_shorter():
 def test_diffusion_schedule_ends_in_pure_noise():
     _, abar = cosine_schedule(50)
     assert abar[0] > 0.99 and abar[-1] < 1e-3
+
+
+def test_field_expert_reaches_the_goal_and_chooses_afresh_at_every_rock():
+    gen = torch.Generator().manual_seed(0)
+    run = sim.rollout(sim.Expert(gen), sim.on_the_line(sim.sample_fields(500, gen)), gen)
+    assert (run["status"] == 1).all()
+    side = torch.sign(run["passed_y"][:, :sim.FIELD_ROCKS])
+    assert 0.4 < (side[:, 1:] == side[:, :-1]).float().mean() < 0.6

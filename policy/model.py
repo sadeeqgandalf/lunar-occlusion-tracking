@@ -1,6 +1,7 @@
 """Two of the three policies: regression (BC-MSE) and an autoregressive (AR) transformer over action tokens.
 
-Both map an observation o (6 numbers, see sim.observe) to a chunk of H actions. Mirrored for the browser in
+Both map an observation o (6 numbers on the single-rock course, 10 in the rock field; see sim.observe) to a chunk of
+H actions. Mirrored for the browser in
 src/policy/policies.js, which runs these exact weights.
 """
 import torch
@@ -28,10 +29,10 @@ class Normalizer(nn.Module):
 class BCPolicy(nn.Module):
     """Behaviour cloning with a squared-error loss: predicts the AVERAGE expert chunk for each observation."""
 
-    def __init__(self, hidden: int = 128):
+    def __init__(self, hidden: int = 128, obs_dim: int = 6):
         super().__init__()
-        self.norm = Normalizer()
-        self.net = nn.Sequential(nn.Linear(6, hidden), nn.SiLU(), nn.Linear(hidden, hidden), nn.SiLU(), nn.Linear(hidden, 2 * H))
+        self.norm = Normalizer(obs_dim)
+        self.net = nn.Sequential(nn.Linear(obs_dim, hidden), nn.SiLU(), nn.Linear(hidden, hidden), nn.SiLU(), nn.Linear(hidden, 2 * H))
 
     def forward(self, obs):                       # -> (B, H, 2) in unit range
         return self.net(self.norm(obs)).view(-1, H, 2)
@@ -63,11 +64,11 @@ class ARPolicy(nn.Module):
     """Predicts action tokens one at a time, each a categorical choice over the vocabulary, so it can put
     probability on 'left' AND 'right' instead of averaging them. Sequence: [o, c_1 .. c_{L-1}] -> logits c_1 .. c_L."""
 
-    def __init__(self, length: int = 8, vocab: int = 65, d: int = 64, heads: int = 4, layers: int = 2):
+    def __init__(self, length: int = 8, vocab: int = 65, d: int = 64, heads: int = 4, layers: int = 2, obs_dim: int = 6):
         super().__init__()
         self.length, self.vocab = length, vocab
-        self.norm = Normalizer()
-        self.obs_in = nn.Sequential(nn.Linear(6, d), nn.SiLU(), nn.Linear(d, d))
+        self.norm = Normalizer(obs_dim)
+        self.obs_in = nn.Sequential(nn.Linear(obs_dim, d), nn.SiLU(), nn.Linear(d, d))
         self.tok = nn.Embedding(vocab, d)
         self.pos = nn.Parameter(torch.randn(length, d) * 0.02)
         self.blocks = nn.ModuleList(Block(d, heads) for _ in range(layers))

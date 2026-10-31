@@ -48,14 +48,14 @@ class FiLMBlock(nn.Module):
 
 
 class DiffusionPolicy(nn.Module):
-    def __init__(self, K: int = 50, hidden: int = 128, blocks: int = 3):
+    def __init__(self, K: int = 50, hidden: int = 128, blocks: int = 3, obs_dim: int = 6):
         super().__init__()
         self.K = K
         betas, abar = cosine_schedule(K)
         self.register_buffer("betas", betas)
         self.register_buffer("abar", abar)
-        self.norm = Normalizer()
-        self.obs_in = nn.Sequential(nn.Linear(6, 64), nn.SiLU(), nn.Linear(64, 64))
+        self.norm = Normalizer(obs_dim)
+        self.obs_in = nn.Sequential(nn.Linear(obs_dim, 64), nn.SiLU(), nn.Linear(64, 64))
         self.step = StepEmbedding(64)
         self.inp = nn.Linear(2 * H, hidden)
         self.blocks = nn.ModuleList(FiLMBlock(hidden, 128) for _ in range(blocks))
